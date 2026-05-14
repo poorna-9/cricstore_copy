@@ -1,0 +1,15 @@
+{% extends 'store/main.html' %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Upload Your Photo</h2>
+    <form method="POST" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="photo">Choose a photo:</label>
+            <input type="file" class="form-control-file" id="photo" name="photo" required>
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Upload</button>
+    </form>
+</div>
+{% endblock %}

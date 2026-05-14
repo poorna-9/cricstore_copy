@@ -1,0 +1,35 @@
+{% extends 'store/main.html' %}
+{% load static %}
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        
+        <div class="col-lg-5">
+            <img class="large-product-image img-fluid" src="{{ product.imageURL }}" alt="Product Image">
+        </div>
+
+        <div class="col-lg-7">
+            <h1>{{ product.name }}</h1>
+            <p class="price">Price: Rs.{{ product.price|floatformat:0 }}</p>
+            
+            <div class="form-group mt-3">
+                <label for="size-select">Size:</label>
+                <select id="size-select" class="form-control">
+                    <option value="S">Small</option>
+                    <option value="M">Medium</option>
+                    <option value="L">Large</option>
+                    <option value="XL">Extra-large</option>
+                    <option value="XXL">Extra-extra-large</option>
+                </select>
+            </div>
+            <button data-product="{{ product.id }}" data-action="add" class="btn btn-outline-secondary add-btn update-cart mt-3">Add to Cart</button>
+
+            <div class="mt-3">
+                <p><strong>Description:</strong> {{ product.description }}</p>
+                <p><strong>Manufacturer:</strong> {{ product.manufacturer }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

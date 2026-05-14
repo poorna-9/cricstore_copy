@@ -1,0 +1,22 @@
+{% extends 'store/main.html' %}
+{% load static %}
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-lg-3">
+            <div class="sidebar">
+                {% for category in categories %}
+                    <a href="{% url 'store' category.id %}" class="category-link">{{ category.name }}</a>
+                {% empty %}
+                    <p>No categories yet!</p>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="col-lg-9">
+            <div class="main-content">
+                <img src="{% static 'store/images/yogendra-singh-Nao0JJTCOrY-unsplash.jpg' %}" alt="Cricket Gear" class="img-fluid">
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

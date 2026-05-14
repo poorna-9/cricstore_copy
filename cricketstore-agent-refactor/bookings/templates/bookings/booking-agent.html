@@ -1,0 +1,48 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Booking Agent — CricStore</title>
+  <link rel="stylesheet" href="{% static 'bookings/css/agent.css' %}">
+</head>
+<body>
+
+<div class="agent-root">
+  <aside class="agent-chat">
+    <header class="agent-chat-header">
+      <h3>Booking Agent</h3>
+      <small id="modeLabel">Choose an option to begin</small>
+    </header>
+
+    <div id="chatMessages" class="agent-chat-messages" aria-live="polite"></div>
+    <div id="quickReplies" class="quick-replies"></div>
+
+    <form id="chatForm" class="agent-chat-input" autocomplete="off">
+      <input
+        id="chatInput"
+        name="query"
+        type="text"
+        placeholder="Type your request..."
+        disabled
+      />
+      <button id="sendBtn" type="submit" disabled>Send</button>
+    </form>
+  </aside>
+  <main id="agentContent" class="agent-content">
+    <div class="agent-welcome">
+      <h2>Welcome to the AI Booking Agent</h2>
+      <p>Select an option on the left to get started.</p>
+    </div>
+  </main>
+
+</div>
+<script>
+  const CHATBOT_URL = "{% url 'userquerychatbot' %}";
+</script>
+<script src="{% static 'bookings/javascript/booking_agent.js' %}"></script>
+<script src="{% static 'bookings/javascript/location.js' %}"></script>
+</body>
+</html>

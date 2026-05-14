@@ -1,0 +1,95 @@
+{% extends 'bookings/main.html' %}
+{% load static %}
+
+{% block head %}
+<link rel="stylesheet" href="{% static 'bookings/css/groundpage.css' %}">
+{% endblock head %}
+
+{% block content %}
+<div class="ground-detail-container">
+  <div class="ground-info">
+    <img src="{{ ground.imageURL }}" alt="{{ ground.name }}">
+
+    <div class="ground-text">
+      <h2>{{ ground.name }}</h2>
+      <p>{{ ground.address }}</p>
+
+      <div class="rating-stars">
+        {% for i in "12345" %}
+          {% if forloop.counter <= ground.rating %}
+              ⭐
+          {% else %}
+              ☆
+          {% endif %}
+        {% endfor %}
+        <span>({{ ground.rating }}/5)</span>
+      </div>
+      <a href="{% url 'tournamentBookingPage' ground.id %}" class="tournament-btn"> Tournament Booking</a>
+    </div>
+  </div>
+  <div class="date-selection" style="margin-bottom:20px;">
+    <label for="slot-date">Select Date: </label>
+    <input type="date" id="slot-date" min="{{ today }}" value="{{ date }}">
+  </div>
+
+  <div id="slots-section"
+       class="slots-section"
+       data-groundid="{{ ground.id }}"
+       data-userid="{{ request.user.id }}">
+
+    <h2>Available Time Slots</h2>
+
+    <div class="times-grid">
+      {% for slot in all_slots %}
+        
+        {% if slot.id in booked %}
+          <div class="slot booked" data-slotid="{{ slot.id }}">
+            {{ slot.starttime|time:"h:i A" }} - {{ slot.endtime|time:"h:i A" }}
+            ₹ {{slot.price|floatformat:2}} 
+          </div>
+
+        {% elif slot.id in userreservedslots %}
+          <div class="slot my-reserved" data-slotid="{{ slot.id }}">
+            {{ slot.starttime|time:"h:i A" }} - {{ slot.endtime|time:"h:i A" }} 
+            ₹ {{slot.price|floatformat:2}}
+          </div>
+
+        {% elif slot.id in reserved %}
+          <div class="slot reserved" data-slotid="{{ slot.id }}">
+            {{ slot.starttime|time:"h:i A" }} - {{ slot.endtime|time:"h:i A" }} 
+            ₹ {{slot.price|floatformat:2}}
+          </div>
+
+        {% else %}
+          <div class="slot available" data-slotid="{{ slot.id }}">
+            {{ slot.starttime|time:"h:i A" }} - {{ slot.endtime|time:"h:i A" }}
+             ₹ {{slot.price|floatformat:2}}
+          </div>
+        {% endif %}
+
+      {% empty %}
+        <p>No slots available for this date.</p>
+      {% endfor %}
+    </div>
+    <div style="margin-top:15px;">
+      <span style="display:inline-block;width:14px;height:14px;background:#28a745;margin-right:5px;"></span> Available &nbsp;
+      <span style="display:inline-block;width:14px;height:14px;background:#ffc107;margin-right:5px;"></span> Your Reserved &nbsp;
+      <span style="display:inline-block;width:14px;height:14px;background:#6c757d;margin-right:5px;"></span> Booked &nbsp;
+      <span style="display:inline-block;width:14px;height:14px;background:#17a2b8;margin-right:5px;"></span> Reserved &nbsp;
+    </div>
+    <div style="margin-top:25px;text-align:center;">
+      <form method="POST" id="checkoutForm" >
+        {% csrf_token %}
+        <input type="hidden" name="session_id" id="sessionIdInput">
+        <input type="hidden" name="selected_slots" id="selectedSlotsInput">
+        <button type="submit" class="btn-booknow">Book Now</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock content %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script src="{% static 'bookings/javascript/groundpage.js' %}?v=3"></script>
+{% endblock extra_js %}

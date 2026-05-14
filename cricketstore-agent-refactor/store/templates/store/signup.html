@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Signup</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'store/css/custom.css' %}">
+</head>
+<body>
+    <div class="container mt-5">
+        <h2>Signup</h2>
+        <form method="POST" id="signup-form">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit" class="btn btn-primary">Signup</button>
+        </form>
+        <p class="mt-2">Already have an account? <a href="{% url 'login' %}">Login here</a></p>
+    </div>
+    <script type="text/javascript" src="{% static 'store/js/signup.js' %}"></script>
+</body>
+</html>

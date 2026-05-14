@@ -1,0 +1,82 @@
+{% extends 'bookings/main.html' %}
+{% load static %}
+{% block title %}Sports Venues{% endblock title %}
+{% block content %}
+<h3 class="mb-4 fw-semibold text-center">Sports Venues in {{ selected_city|default:"Bangalore" }}</h3>
+<div class="row g-4">
+    {% for ground in grounds %}
+        <div class="col-lg-4 col-md-6 col-sm-12">
+            <div class="card shadow-sm border-0 rounded-4 h-100">
+                <a href="{% url 'grounddetail' pk=ground.id %}" class="text-decoration-none text-dark">
+                    <div class="position-relative">
+                        {% if ground.image %}
+                            <img src="{{ ground.imageURL }}" class="card-img-top rounded-top-4" alt="{{ ground.name }}">
+                        {% else %}
+                            <img src="{% static 'bookings/images/default_ground.jpg' %}" class="card-img-top rounded-top-4" alt="{{ ground.name }}">
+                        {% endif %}
+                    </div>
+                </a>
+
+                <div class="card-body text-center">
+                    <h5 class="card-title fw-semibold mb-2">{{ ground.name }}</h5>
+                    <p class="text-muted small mb-2 text-capitalize">
+                        <i class="fas fa-map-marker-alt me-1 text-danger"></i>{{ ground.city }} | {{ ground.types }}
+                    </p>
+
+                    {% if ground.price %}
+                        <p class="fw-bold text-success mb-3">
+                            ₹{{ ground.price }} <span class="text-muted small">per slot</span>
+                        </p>
+                    {% else %}
+                        <p class="text-secondary mb-3">Price not available</p>
+                    {% endif %}
+
+                    <a href="{% url 'grounddetail' pk=ground.id %}" class="btn btn-outline-primary w-100">
+                        View Details
+                    </a>
+                </div>
+            </div>
+        </div>
+    {% empty %}
+        <div class="text-center py-5">
+            <h5 class="text-muted">No venues found in this city.</h5>
+        </div>
+    {% endfor %}
+</div>
+
+{% endblock content %}
+{% block extra_js %}
+<script>
+    const LOCATIONIQ_API_KEY = "pk.9a6225b4ea47b4e24c62938d1d821a4f";
+    function getUserLocation() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    const url = `https://us1.locationiq.com/v1/reverse?key=${LOCATIONIQ_API_KEY}&lat=${lat}&lon=${lon}&format=json`;
+                    fetch(url)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data && data.display_name) {
+                                document.getElementById("user_address").value = data.display_name;
+                            } else {
+                                alert("Unable to get address. Please type manually.");
+                            }
+                        })
+                        .catch(err => {
+                            alert("Error retrieving your address. Please enter it manually.");
+                        });
+                },
+
+                (error) => {
+                    alert("Error retrieving your GPS location. Please enter it manually.");
+                }
+            );
+
+        } else {
+            alert("Geolocation is not supported by your browser.");
+        }
+    }
+</script>
+{% endblock extra_js %}

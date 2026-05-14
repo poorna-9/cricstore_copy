@@ -1,0 +1,15 @@
+{% extends 'store/main.html' %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Photo Results</h2>
+    <img src="{{ file_url }}" alt="Uploaded photo" width="200">
+
+    <h5>Suggested Dress Colors:</h5>
+    <ul>
+      {% for color in suggested_colors %}
+        <li>{{ color }}</li>
+      {% endfor %}
+    </ul>
+</div>
+{% endblock %}

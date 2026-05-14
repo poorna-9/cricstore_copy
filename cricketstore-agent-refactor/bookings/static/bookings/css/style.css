@@ -1,0 +1,253 @@
+/* Reset & base */
+body, h1, h2, p, form, input, select, button {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+}
+
+body {
+  background: #f8f8f8;
+  color: #333;
+}
+
+/* Page1 styles */
+body.page1 {
+  background: url("/static/bookings/images/piyush-bansal-WvlFN57CyL8-unsplash.jpg") no-repeat center center fixed;
+  background-size: cover;
+  min-height: 100vh;
+  margin: 0;
+  font-family: sans-serif;
+  color: #fff; 
+}
+.page1 .city-selector {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+.city-selector h1 {
+  margin-bottom: 20px;
+}
+
+.city-selector select,
+.city-selector button {
+  padding: 10px;
+  margin: 5px;
+  font-size: 16px;
+}
+
+/* Navbar */
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #007bff;
+  padding: 10px 20px;
+}
+
+.navbar a {
+  color: #fff;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.navbar form {
+  display: flex;
+}
+
+.navbar input {
+  padding: 5px;
+  border: none;
+  border-radius: 4px 0 0 4px;
+}
+
+.navbar button {
+  padding: 5px 10px;
+  border: none;
+  background: #0056b3;
+  color: #fff;
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(1000px, 1fr));
+  gap: 30px;
+  padding: 20px;
+}
+
+.card {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+}
+
+.card img {
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+}
+
+.card-body {
+  padding: 15px;
+  text-align: center;
+}
+
+.card-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.card p {
+  margin: 0;
+}
+
+.btn {
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+
+/* Ground Details Page */
+.ground-detail-container {
+  max-width: 1000px;
+  margin: 30px auto;
+  padding: 20px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.ground-info {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.ground-info img {
+  width: 300px;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.ground-text h2 {
+  margin-bottom: 10px;
+}
+
+/* Slots Section */
+.slots-section {
+  margin-top: 20px;
+}
+
+.slots-section h2 {
+  margin-bottom: 10px;
+}
+
+.times-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr); /* 6 columns per row */
+  gap: 10px;
+}
+
+.slot {
+  padding: 10px;
+  border-radius: 8px;
+  text-align: center;
+  font-weight: 500;
+  margin: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+/* Available slots */
+.slot.available {
+  background-color: #28a745; /* Green */
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+.slot.available:hover {
+  background-color: #218838;
+  transform: scale(1.05);
+}
+
+/* Slots selected/reserved by current user */
+.slot.my-reserved,
+.slot.selected {
+  background-color: #e8b714; /* Yellow */
+  color: #212529;
+  border: 2px solid #d4af37;
+  position: relative;
+  transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+.slot.my-reserved::after,
+.slot.selected::after {
+  content: "✓";
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  font-size: 1.1em;
+  color: #212529;
+  font-weight: bold;
+}
+
+
+.slot.reserved,
+.slot.booked {
+  background-color: #6c757d; /* Grey */
+  color: white;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+
+.checkout-container {
+  max-width: 400px;
+  margin: 50px auto;
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.checkout-container h1 {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.checkout-container label {
+  display: block;
+  margin-top: 10px;
+}
+
+.checkout-container input {
+  width: 100%;
+  padding: 8px;
+  margin-top: 5px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.checkout-container button {
+  width: 100%;
+  padding: 10px;
+  margin-top: 20px;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}

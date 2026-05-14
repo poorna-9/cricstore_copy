@@ -1,0 +1,20 @@
+.tournament-btn{
+    display:inline-block;
+    padding:10px 18px;
+    background:#ff5722;
+    color:white;
+    border-radius:6px;
+    margin-top:10px;
+    cursor:pointer;
+    font-weight:600;
+    text-decoration:none;
+}
+.tournament-btn:hover{
+    background:#d84315;
+}
+
+.rating-stars {
+    font-size:20px;
+    margin-top:5px;
+    color:#ffc107;
+}

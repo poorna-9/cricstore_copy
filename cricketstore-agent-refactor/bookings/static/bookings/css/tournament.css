@@ -1,0 +1,161 @@
+/* ===============================
+   PAGE WRAPPER
+================================ */
+.tournament-page {
+    width: 90%;
+    max-width: 900px;
+    margin: 25px auto;
+    background: #fff;
+    padding: 25px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+}
+
+/* ===============================
+   SLOT TYPE
+================================ */
+.tournament-page .slot-type-box {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    margin-top: 20px;
+    font-weight: 600;
+}
+
+.tournament-page .slot-type-box label {
+    cursor: pointer;
+}
+
+.tournament-page .slot-type-box input {
+    margin-right: 6px;
+}
+
+/* ===============================
+   DATE GRID
+================================ */
+.tournament-page .date-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 12px;
+    margin-top: 20px;
+}
+
+/* ===============================
+   DATE CARD BASE
+================================ */
+.tournament-page .date-card {
+    padding: 14px 10px;
+    border-radius: 10px;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 600;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tournament-page .date-card .display-date {
+    display: block;
+    font-size: 13px;
+    opacity: 0.9;
+}
+
+.tournament-page .date-card .day-num {
+    display: block;
+    font-size: 18px;
+    margin-top: 4px;
+}
+
+/* ===============================
+   AVAILABLE
+================================ */
+.tournament-page .date-card.available {
+    background: #28a745;
+    color: white;
+    cursor: pointer;
+}
+
+.tournament-page .date-card.available:hover {
+    transform: scale(1.07);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+}
+
+/* ===============================
+   USER RESERVED
+================================ */
+.tournament-page .date-card.my-reserved {
+    background: #ffc107;
+    color: #212529;
+    cursor: pointer;
+}
+
+.tournament-page .date-card.my-reserved:hover {
+    transform: scale(1.05);
+}
+
+/* ===============================
+   RESERVED BY OTHERS
+================================ */
+.tournament-page .date-card.reserved {
+    background: #17a2b8;
+    color: white;
+    cursor: not-allowed;
+    pointer-events: none;
+    opacity: 0.65;
+}
+
+/* ===============================
+   BOOKED
+================================ */
+.tournament-page .date-card.booked {
+    background: #6c757d;
+    color: white;
+    cursor: not-allowed;
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+/* Disable hover animation */
+.tournament-page .date-card.reserved:hover,
+.tournament-page .date-card.booked:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+/* ===============================
+   BOOK BUTTON
+================================ */
+.tournament-page .btn-booknow {
+    width: 100%;
+    max-width: 300px;
+    padding: 14px;
+    background: #007bff;
+    color: white;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    transition: 0.25s ease;
+}
+
+.tournament-page .btn-booknow:hover {
+    background: #0056b3;
+    transform: scale(1.04);
+}
+
+/* ===============================
+   LEGEND
+================================ */
+.tournament-page .legend {
+    text-align: center;
+    margin-top: 15px;
+    font-size: 14px;
+}
+
+/* ===============================
+   RESPONSIVE
+================================ */
+@media (max-width: 600px) {
+    .tournament-page .date-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+}

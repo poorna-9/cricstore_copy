@@ -1,0 +1,91 @@
+{% extends 'bookings/main.html' %}
+{% load static %}
+
+{% block head %}
+<style>
+.checkout-container {
+  max-width: 700px;
+  margin: 40px auto;
+  padding: 20px;
+}
+
+.checkout-card {
+  background: #fff;
+  padding: 25px;
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+}
+
+.booking-summary ul {
+  list-style: none;
+  padding: 0;
+}
+
+.booking-summary li {
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.pay-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #4CAF50, #2ecc71);
+  border: none;
+  color: white;
+  font-size: 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pay-btn:hover {
+  transform: scale(1.02);
+}
+.alert {
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  text-align: center;
+}
+.alert.cancel {
+  background: #fdecea;
+  color: #e74c3c;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="checkout-container">
+  <div class="checkout-card">
+    <h1>Checkout</h1>
+
+    {% if payment_status == "cancel" %}
+      <div class="alert cancel">
+        ❌ Payment cancelled. Try again.
+      </div>
+    {% endif %}
+
+    <div class="booking-summary">
+      <h3>Selected Slots</h3>
+      <ul>
+        {% for s in slots %}
+          <li>
+            {{ s.starttime|time:"h:i A" }} -
+            {{ s.endtime|time:"h:i A" }}
+            <strong>₹{{ s.price }}</strong>
+          </li>
+        {% endfor %}
+      </ul>
+
+      <p><strong>Ground:</strong> {{ ground.name }}</p>
+      <p><strong>Total:</strong> ₹{{ total }}</p>
+    </div>
+
+    <form method="POST">
+      {% csrf_token %}
+      <button type="submit" class="pay-btn">
+        Pay ₹{{ total }}
+      </button>
+    </form>
+
+  </div>
+</div>
+{% endblock %}

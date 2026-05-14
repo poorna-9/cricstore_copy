@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>My Orders</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'store/css/orders.css' %}">
+</head>
+<body>
+
+  <div class="orders-container">
+    <h2>My Orders</h2>
+
+    {% for order in orders %}
+      <div class="order-card">
+        <div class="order-header">
+          <p><strong>Transaction ID:</strong> {{ order.transaction_id }}</p>
+        </div>
+
+        <div class="order-items">
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Price</th>
+                <th>Size</th>
+                <th>Quantity</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in order.items %}
+              <tr>
+                <td>{{ item.name }}</td>
+                <td>{{ item.price }}</td>
+                <td>{{ item.size }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.total_price }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="order-summary">
+          <p><strong>Total Items:</strong> {{ order.total_items }}</p>
+          <p><strong>Total Amount:</strong> ₹{{ order.total_amount }}</p>
+        </div>
+
+        <div class="order-footer">
+          <p><strong>Order Date:</strong> {{ order.date_ordered }}</p>
+        </div>
+      </div>
+    {% empty %}
+      <p>You have no past orders.</p>
+    {% endfor %}
+
+  </div>
+
+</body>
+</html>

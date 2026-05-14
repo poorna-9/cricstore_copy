@@ -1,0 +1,171 @@
+{% load static %}
+
+<link rel="stylesheet" href="{% static 'bookings/css/ground_list.css' %}">
+
+<h3 class="mb-4 fw-semibold text-center">
+    Sports Venues in {{ selected_city|default:"Bangalore" }}
+</h3>
+
+<div class="ground-list">
+    {% for ground in grounds %}
+        <div class="ground-card">
+            <!-- Left: Clickable Image -->
+            <a href="{% url 'grounddetail' pk=ground.id %}" class="ground-image">
+                <img src="{% if ground.image %}{{ ground.imageURL }}{% else %}{% static 'bookings/images/default_ground.jpg' %}{% endif %}" alt="{{ ground.name }}">
+            </a>
+
+            <!-- Right: Details -->
+            <div class="ground-details">
+                <h4 class="ground-name">{{ ground.name }}</h4>
+                <p class="ground-info"><i class="fas fa-map-marker-alt me-1 text-danger"></i>{{ ground.city|default:"-" }} | {{ ground.types|default:"-" }}</p>
+                <p class="ground-address text-muted">{{ ground.address|default:"Address not available" }}</p>
+
+                {% if ground.morning_price or ground.afternoon_price or ground.evening_price or ground.night_price %}
+                    <div class="ground-prices">
+                        {% if ground.morning_price %}<p><strong>Morning:</strong> ₹{{ ground.morning_price }}</p>{% endif %}
+                        {% if ground.afternoon_price %}<p><strong>Afternoon:</strong> ₹{{ ground.afternoon_price }}</p>{% endif %}
+                        {% if ground.evening_price %}<p><strong>Evening:</strong> ₹{{ ground.evening_price }}</p>{% endif %}
+                        {% if ground.night_price %}<p><strong>Night:</strong> ₹{{ ground.night_price }}</p>{% endif %}
+                    </div>
+                {% else %}
+                    <p class="text-secondary">Price not available</p>
+                {% endif %}
+
+                <a href="{% url 'grounddetail' pk=ground.id %}" class="btn btn-primary mt-auto">View Details</a>
+            </div>
+        </div>
+    {% empty %}
+        <div class="text-center py-5">
+            <h5 class="text-muted">No venues found in this city.</h5>
+        </div>
+    {% endfor %}
+</div>
+
+<style>
+/* Container */
+.ground-list {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Card */
+.ground-card {
+    display: flex;
+    background: #fff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ground-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+}
+
+/* Left half: Image */
+.ground-image {
+    flex: 1 1 50%;
+    max-width: 50%;
+    display: block;
+}
+
+.ground-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.2s ease;
+    display: block;
+}
+
+.ground-image:hover img {
+    transform: scale(1.05);
+}
+
+/* Right half: Details */
+.ground-details {
+    flex: 1 1 50%;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+}
+
+.ground-name {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.ground-info {
+    font-size: 0.95rem;
+    color: #555;
+    margin-bottom: 5px;
+}
+
+.ground-address {
+    font-size: 1rem; 
+    margin-bottom: 12px;
+    color: #4b5563; 
+    line-height: 1.4;
+}
+
+.ground-prices {
+    margin-top: 8px;
+}
+
+.ground-prices p {
+    margin: 3px 0;
+    font-weight: 600;
+    font-size: 1rem;   
+}
+
+.ground-prices p:nth-child(1) {
+    color: #16a34a; 
+}
+
+.ground-prices p:nth-child(2) {
+    color: #2563eb;
+}
+
+.ground-prices p:nth-child(3) {
+    color: #ea580c; 
+}
+
+.ground-prices p:nth-child(4) {
+    color: #7c3aed; 
+}
+.ground-details .btn {
+    align-self: flex-start;
+    border-radius: 10px;
+    padding: 9px 18px;
+    margin-top: 14px;
+    font-weight: 600;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    border: none;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ground-details .btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.35);
+}
+
+/* Responsive: Stack on small screens */
+@media (max-width: 768px) {
+    .ground-card {
+        flex-direction: column;
+    }
+
+    .ground-image,
+    .ground-details {
+        max-width: 100%;
+        flex: none;
+    }
+
+    .ground-details .btn {
+        width: 100%;
+    }
+}
+</style>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>User Profile</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'store/css/profile.css' %}">
+</head>
+<body>
+
+  <div class="profile-container">
+    <h2>User Profile</h2>
+
+    <div class="profile-info">
+      <p><strong>Name:</strong> {{ user.username }}</p>
+      <p><strong>Email:</strong> {{ user.email }}</p>
+    </div>
+
+    <div class="profile-info">
+      <p><strong>Shipping Address:</strong></p>
+      {% for addr in addresses %}
+        <div style="margin-bottom: 15px;">
+          <p>{{ addr.address }}, {{ addr.city }}, {{ addr.state }} - {{ addr.zipcode }}</p>
+        </div>
+      {% empty %}
+        <p>No saved addresses.</p>
+      {% endfor %}
+    </div>
+    <div style="margin-top: 20px;">
+      <a href="{% url myorders }">
+        <button class="btn orders-btn">My Orders</button>
+      </a>
+    </div>
+    <form method="POST" action="{% url 'logout' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn logout-btn">Log Out</button>
+    </form>
+
+  </div>
+
+  
+</body>
+</html>
