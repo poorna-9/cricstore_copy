@@ -1,0 +1,139 @@
+{% extends 'bookings/main.html' %}
+
+{% block head %}
+<style>
+.waiting-container{
+    min-height:70vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    padding:20px;
+}
+
+.waiting-card{
+    width:100%;
+    max-width:500px;
+    background:#fff;
+    border-radius:16px;
+    padding:40px 30px;
+    text-align:center;
+    box-shadow:0 6px 20px rgba(0,0,0,0.08);
+}
+
+.loader{
+    width:70px;
+    height:70px;
+    border:6px solid #eee;
+    border-top:6px solid #4CAF50;
+    border-radius:50%;
+    margin:0 auto 25px;
+    animation:spin 1s linear infinite;
+}
+
+@keyframes spin{
+    100%{
+        transform:rotate(360deg);
+    }
+}
+
+.waiting-title{
+    font-size:28px;
+    font-weight:700;
+    margin-bottom:10px;
+}
+
+.waiting-text{
+    color:#666;
+    font-size:16px;
+    line-height:1.6;
+}
+
+.status-text{
+    margin-top:20px;
+    color:#4CAF50;
+    font-weight:600;
+    font-size:15px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="waiting-container">
+
+    <div class="waiting-card">
+
+        <div class="loader"></div>
+
+        <h2 class="waiting-title">
+            Confirming Your Payment
+        </h2>
+
+        <p class="waiting-text">
+            Please wait while we verify your payment
+            and confirm your booking.
+        </p>
+
+        <div class="status-text" id="statusText">
+            Checking payment status...
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+const orderId = "{{ razorpay_order_id }}";
+
+async function checkPaymentStatus() {
+
+    try {
+
+        const response = await fetch(
+            `/bookings/check_payment_status/${orderId}/`
+        );
+
+        const data = await response.json();
+
+        console.log(data);
+
+        if (data.status === "success") {
+
+            document.getElementById("statusText").innerText =
+                "Payment successful! Redirecting...";
+
+            window.location.href = data.redirect;
+        }
+
+        else if (data.status === "expired") {
+
+            alert("Payment session expired");
+
+            window.location.href = data.redirect;
+        }
+
+        else if (data.status === "failed") {
+
+            alert("Payment failed");
+
+            window.location.href = data.redirect;
+        }
+
+    }
+
+    catch (err) {
+
+        console.error(err);
+
+    }
+
+}
+
+checkPaymentStatus();
+
+setInterval(checkPaymentStatus, 3000);
+
+</script>
+
+{% endblock %}

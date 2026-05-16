@@ -1,0 +1,401 @@
+{% extends 'bookings/main.html' %}
+{% load static %}
+
+{% block head %}
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap');
+
+    :root {
+        --green: #1a9e5c;
+        --green-light: #e6f7ef;
+        --red: #e03c3c;
+        --red-light: #fdecea;
+        --blue-light: #e8f0fe;
+        --blue: #3b5bdb;
+        --text: #1a1a2e;
+        --muted: #6b7280;
+        --border: #ececec;
+        --card-bg: #ffffff;
+        --bg: #f6f7fb;
+    }
+
+    body {
+        background: var(--bg);
+        font-family: 'DM Sans', sans-serif;
+        color: var(--text);
+    }
+
+    .bd-wrapper {
+        max-width: 680px;
+        margin: 48px auto;
+        padding: 0 20px 60px;
+    }
+
+    .bd-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--muted);
+        text-decoration: none;
+        margin-bottom: 20px;
+        transition: color 0.2s;
+    }
+
+    .bd-back:hover {
+        color: var(--text);
+    }
+
+    .bd-card {
+        background: var(--card-bg);
+        border-radius: 16px;
+        box-shadow: 0 2px 24px rgba(0,0,0,0.07);
+        overflow: hidden;
+    }
+
+    /* Header */
+    .bd-header {
+        background: linear-gradient(135deg, #0f4c35 0%, #1a9e5c 100%);
+        padding: 28px 30px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+
+    .bd-header-left h2 {
+        font-family: 'Syne', sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        color: #fff;
+        margin: 0 0 4px;
+    }
+
+    .bd-header-left p {
+        margin: 0;
+        font-size: 13px;
+        color: rgba(255,255,255,0.7);
+    }
+
+    .bd-status-badge {
+        padding: 5px 14px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+    }
+
+    .bd-status-badge.confirmed {
+        background: rgba(255,255,255,0.2);
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.35);
+    }
+
+    .bd-status-badge.cancelled {
+        background: var(--red-light);
+        color: var(--red);
+    }
+
+    /* Body */
+    .bd-body {
+        padding: 28px 30px;
+    }
+
+    .bd-section {
+        padding: 18px 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .bd-section:last-of-type {
+        border-bottom: none;
+    }
+
+    .bd-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 10px;
+    }
+
+    .bd-ground-name {
+        font-family: 'Syne', sans-serif;
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text);
+        margin: 0 0 4px;
+    }
+
+    .bd-ground-address {
+        font-size: 13px;
+        color: var(--muted);
+        margin: 0;
+    }
+
+    .bd-meta-row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+
+    .bd-date {
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--text);
+    }
+
+    .bd-type-badge {
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        background: var(--blue-light);
+        color: var(--blue);
+    }
+
+    /* Slots */
+    .bd-slot-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 14px;
+        border-radius: 8px;
+        margin-bottom: 6px;
+        background: var(--bg);
+    }
+
+    .bd-slot-row:last-child {
+        margin-bottom: 0;
+    }
+
+    .bd-slot-time {
+        font-size: 14px;
+        color: var(--text);
+        font-weight: 500;
+    }
+
+    .bd-slot-price {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--green);
+    }
+
+    /* Payment info */
+    .bd-info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .bd-info-row:last-child {
+        margin-bottom: 0;
+    }
+
+    .bd-info-key {
+        font-size: 13px;
+        color: var(--muted);
+    }
+
+    .bd-info-val {
+        font-size: 13px;
+        color: var(--text);
+        font-weight: 500;
+        text-align: right;
+        max-width: 60%;
+        word-break: break-all;
+    }
+
+    /* Total */
+    .bd-total-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 30px;
+        border-top: 1px solid var(--border);
+        background: var(--bg);
+    }
+
+    .bd-total-label {
+        font-family: 'Syne', sans-serif;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .bd-total-amount {
+        font-family: 'Syne', sans-serif;
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--green);
+    }
+
+    /* Actions */
+    .bd-actions {
+        padding: 20px 30px;
+        display: flex;
+        gap: 12px;
+    }
+
+    .bd-btn {
+        flex: 1;
+        text-align: center;
+        padding: 13px;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 500;
+        text-decoration: none;
+        border: none;
+        cursor: pointer;
+        transition: opacity 0.2s, transform 0.15s;
+        font-family: 'DM Sans', sans-serif;
+    }
+
+    .bd-btn:hover {
+        opacity: 0.88;
+        transform: translateY(-1px);
+    }
+
+    .bd-btn.secondary {
+        background: var(--bg);
+        color: var(--muted);
+        border: 1px solid var(--border);
+    }
+
+    .bd-btn.danger {
+        background: var(--red-light);
+        color: var(--red);
+    }
+
+    /* Cancelled overlay */
+    .bd-cancelled-banner {
+        margin: 0 30px 0;
+        padding: 12px 16px;
+        background: var(--red-light);
+        border-radius: 8px;
+        color: var(--red);
+        font-size: 13px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bd-wrapper">
+
+    <a href="{% url 'grounds_page' %}" class="bd-back">
+        ← Back to Grounds
+    </a>
+
+    <div class="bd-card">
+
+        <!-- Header -->
+        <div class="bd-header">
+            <div class="bd-header-left">
+                <h2>Booking Details</h2>
+                <p>Booking ID: {{ booking.id }}</p>
+            </div>
+            <span class="bd-status-badge {% if booking.is_cancelled %}cancelled{% else %}confirmed{% endif %}">
+                {% if booking.is_cancelled %}Cancelled{% else %}Confirmed{% endif %}
+            </span>
+        </div>
+
+        <!-- Cancelled banner -->
+        {% if booking.is_cancelled %}
+        <div class="bd-cancelled-banner">
+            ⚠ This booking has been cancelled.
+        </div>
+        {% endif %}
+
+        <div class="bd-body">
+
+            <!-- Ground -->
+            <div class="bd-section">
+                <p class="bd-label">Ground</p>
+                <p class="bd-ground-name">{{ booking.ground.name }}</p>
+                <p class="bd-ground-address">{{ booking.ground.address }}</p>
+            </div>
+
+            <!-- Date & Type -->
+            <div class="bd-section">
+                <p class="bd-label">Date & Type</p>
+                <div class="bd-meta-row">
+                    <span class="bd-date">{{ booking.date|date:"d M Y" }}</span>
+                    <span class="bd-type-badge">{{ booking.Tournament_or_normal|capfirst }}</span>
+                </div>
+            </div>
+
+            <!-- Slots -->
+            <div class="bd-section">
+                <p class="bd-label">Slots Booked</p>
+                {% for slot in slots %}
+                <div class="bd-slot-row">
+                    <span class="bd-slot-time">
+                        {{ slot.starttime|time:"h:i A" }} – {{ slot.endtime|time:"h:i A" }}
+                    </span>
+                    <span class="bd-slot-price">₹{{ slot.price }}</span>
+                </div>
+                {% empty %}
+                <p style="color:var(--muted); font-size:14px;">No slots found.</p>
+                {% endfor %}
+            </div>
+
+            <!-- Payment Info -->
+            <div class="bd-section">
+                <p class="bd-label">Payment Info</p>
+                <div class="bd-info-row">
+                    <span class="bd-info-key">Transaction ID</span>
+                    <span class="bd-info-val">{{ booking.transaction_id }}</span>
+                </div>
+                <div class="bd-info-row">
+                    <span class="bd-info-key">Booked On</span>
+                    <span class="bd-info-val">{{ booking.created_at|date:"d M Y, h:i A" }}</span>
+                </div>
+                <div class="bd-info-row">
+                    <span class="bd-info-key">Payment Status</span>
+                    <span class="bd-info-val">
+                        {% if booking.payment_status %}Paid{% else %}Pending{% endif %}
+                    </span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Total -->
+        <div class="bd-total-row">
+            <span class="bd-total-label">Total Paid</span>
+            <span class="bd-total-amount">₹{{ booking.price }}</span>
+        </div>
+
+        <!-- Actions -->
+        <div class="bd-actions">
+            <a href="{% url 'grounds_page' %}" class="bd-btn secondary">
+                Back to Grounds
+            </a>
+            {% if not booking.is_cancelled %}
+            <a href="{% url 'cancel_booking' booking.id %}" class="bd-btn danger" id="cancel-btn">
+                Cancel Booking
+            </a>
+            {% endif %}
+        </div>
+
+    </div>
+</div>
+
+<script>
+    const cancelBtn = document.getElementById("cancel-btn");
+    if (cancelBtn) {
+        cancelBtn.addEventListener("click", function (e) {
+            e.preventDefault();
+            if (confirm("Are you sure you want to cancel this booking?")) {
+                window.location.href = cancelBtn.href;
+            }
+        });
+    }
+</script>
+{% endblock %}

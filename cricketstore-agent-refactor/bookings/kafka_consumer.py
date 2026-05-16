@@ -10,7 +10,7 @@ from django.utils import timezone
 from kafka import KafkaConsumer
 
 from .kafka_producer import send_dlq_event, send_notification_event, send_retry_event
-from .models import Orders, payment, reservedslots, reservetournament, slots
+from .models import Bookings, Orders, payment, reservedslots, reservetournament, slots
 
 logger = logging.getLogger(__name__)
 MAX_RETRY = 3
@@ -50,140 +50,55 @@ def _notify_booking_created(order, booked_slots):
     })
 
 
-def process_normal_booking(pay):
-    session = pay.session
-    if not session:
-        logger.warning("Payment %s has no normal reservation session", pay.id)
-        return
-    if Orders.objects.filter(transaction_id=pay.payment_id, Tournament_or_normal="normal").exists():
-        logger.info("Normal order already exists for payment %s", pay.id)
-        return
-
-    reserved = reservedslots.objects.select_for_update().filter(
-        session=session,
-        status="reserved",
-    ).select_related("slot")
-
-    slots_to_update = []
-    rs_to_update = []
-    booked_slots = []
-    total_price = 0
-
-    for rs in reserved:
-        slot = rs.slot
-        if slot.is_booked:
-            continue
-        slot.is_booked = True
-        slot.is_blocked = False
-        slot.blocked_at = None
-        slots_to_update.append(slot)
-        rs.status = "booked"
-        rs_to_update.append(rs)
-        booked_slots.append(slot)
-        total_price += slot.price or 0
-
-    if not booked_slots:
-        logger.warning("No normal slots to book for payment %s", pay.id)
-        return
-
-    slots.objects.bulk_update(slots_to_update, ["is_booked", "is_blocked", "blocked_at"])
-    reservedslots.objects.bulk_update(rs_to_update, ["status"])
-
-    order = Orders.objects.create(
-        session=None,
-        user=pay.user,
-        ground=session.ground,
-        date=session.date,
-        transaction_id=pay.payment_id or str(pay.id),
-        booked=True,
-        status="booked",
-        price=total_price,
-        Tournament_or_normal="normal",
-    )
-    order.slotsbooked.set(booked_slots)
-    _notify_booking_created(order, booked_slots)
-    logger.info("Normal order created for payment %s", pay.id)
-
-
-def process_tournament_booking(pay):
-    t_session = pay.tournament_session
-    if not t_session:
-        logger.warning("Payment %s has no tournament session", pay.id)
-        return
-    if Orders.objects.filter(transaction_id=pay.payment_id, Tournament_or_normal="tournament").exists():
-        logger.info("Tournament order already exists for payment %s", pay.id)
-        return
-
-    reservations = reservetournament.objects.select_for_update().filter(
-        session=t_session,
-        status="reserved",
-    ).prefetch_related("blocked_slots")
-
-    booked_slots = []
-    total_price = 0
-    reservations_to_update = []
-    slot_ids = []
-
-    for reservation in reservations:
-        reservation_slots = list(reservation.blocked_slots.all())
-        for slot in reservation_slots:
-            if slot.is_booked:
-                continue
-            booked_slots.append(slot)
-            slot_ids.append(slot.id)
-            total_price += slot.price or 0
-        reservation.status = "booked"
-        reservations_to_update.append(reservation)
-
-    if not booked_slots:
-        logger.warning("No tournament slots to book for payment %s", pay.id)
-        return
-
-    locked_slots = list(slots.objects.select_for_update().filter(id__in=slot_ids))
-    for slot in locked_slots:
-        slot.is_booked = True
-        slot.is_blocked = False
-        slot.blocked_at = None
-    slots.objects.bulk_update(locked_slots, ["is_booked", "is_blocked", "blocked_at"])
-    reservetournament.objects.bulk_update(reservations_to_update, ["status"])
-
-    order = Orders.objects.create(
-        session=t_session,
-        user=pay.user,
-        ground=t_session.ground,
-        date=t_session.start_date,
-        transaction_id=pay.payment_id or str(pay.id),
-        booked=True,
-        status="booked",
-        price=total_price,
-        Tournament_or_normal="tournament",
-    )
-    order.slotsbooked.set(locked_slots)
-    _notify_booking_created(order, locked_slots)
-    logger.info("Tournament order created for payment %s", pay.id)
-
-
 def process_booking(data):
     payment_id = data.get("payment_id")
     retry_count = data.get("retry_count", 0)
     if not payment_id:
         logger.error("Missing payment_id in message")
         return
-
     try:
         with transaction.atomic():
-            pay = payment.objects.select_for_update().select_related(
-                "session", "session__ground", "tournament_session", "tournament_session__ground", "user"
-            ).get(id=payment_id)
-            if pay.status != "success":
+            pay = payment.objects.select_for_update().select_related("session","tournament_session","user","session__ground","tournament_session__ground").get(id=payment_id)
+            if not pay.status:
                 logger.warning("Payment %s is not successful yet", payment_id)
                 return
-            if pay.tournament_session_id:
-                process_tournament_booking(pay)
-            elif pay.session_id:
-                process_normal_booking(pay)
-            else:
+            session = pay.tournament_session if pay.tournament_session_id else pay.session
+            if not session:
                 logger.error("Payment %s has no booking session", payment_id)
+                return
+            if Bookings.objects.filter(user=pay.user,normal_session = pay.session, tournament_session=pay.tournament_session,payment_status=True).exists():
+                logger.info("Booking already exists for payment %s", payment_id)
+                return
+            booking_type = "tournament" if pay.tournament_session else "normal"
+            slot_ids = list(
+                Orders.objects.filter(
+                    user=pay.user,
+                    booked=True,
+                    payment_status=True,
+                    Tournament_or_normal=booking_type,
+                    **{"normal_session": pay.session} if pay.session else {"tournament_session": pay.tournament_session},
+                ).values_list("slotsbooked_id", flat=True)
+            )
+            if not slot_ids:
+                logger.warning("No booked order slots found for payment %s", payment_id)
+                return
+            slot_objs = list(slots.objects.filter(id__in=slot_ids))
+            total = sum(float(s.price or 0) for s in slot_objs)
+            booking = Bookings.objects.create(
+                user=pay.user,
+                ground=session.ground,
+                date=session.date,
+                transaction_id=pay.razorpay_payment_id or str(pay.id),
+                booked=True,
+                price=total,
+                payment_status=True,
+                tournament_session=pay.tournament_session if pay.tournament_session_id else None,
+                normal_session=pay.session if pay.session_id else None,
+                Tournament_or_normal=booking_type,
+            )
+            booking.slotsbooked.set(slot_objs)
+            _notify_booking_created(booking, slot_objs)
+            logger.info("Booking created for payment %s", payment_id)
     except payment.DoesNotExist:
         logger.error("Payment not found: %s", payment_id)
     except Exception as e:

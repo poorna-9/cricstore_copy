@@ -83,12 +83,12 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     checkoutForm.addEventListener("submit", function (e) {
+        e.preventDefault();
         if (!sessionId) {
-            e.preventDefault();
             alert("You must select at least one slot!");
             return;
         }
-        this.action = `/bookings/checkout/${sessionId}/`;
+        window.location.href = `/bookings/checkout/${sessionId}/`;
     });
     function refreshReservedSlots() {
         const date = dateInput.value;

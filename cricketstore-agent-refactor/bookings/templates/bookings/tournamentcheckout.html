@@ -41,6 +41,11 @@
   cursor: pointer;
 }
 
+.pay-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .alert {
   padding: 10px;
   border-radius: 6px;
@@ -58,6 +63,7 @@
 {% block content %}
 <div class="checkout-container">
   <div class="checkout-card">
+
     <h1>Tournament Checkout</h1>
 
     {% if payment_status == "cancel" %}
@@ -67,12 +73,14 @@
     {% endif %}
 
     <div class="booking-summary">
+
       <h3>Reserved Days & Slots</h3>
 
       <ul>
         {% for day in reserved %}
           <li>
             <strong>{{ day.date }}</strong>
+
             <ul>
               {% for slot in day.blocked_slots.all %}
                 <li>
@@ -82,56 +90,222 @@
                 </li>
               {% endfor %}
             </ul>
+
           </li>
         {% endfor %}
       </ul>
 
-      <p><strong>Ground:</strong> {{ ground.name }}</p>
-      <p><strong>Total Price:</strong> ₹{{ total }}</p>
+      <p>
+        <strong>Ground:</strong>
+        {{ ground.name }}
+      </p>
+
+      <p>
+        <strong>Total Price:</strong>
+        ₹{{ total }}
+      </p>
 
       {% if remaining_seconds %}
-        <p>
-          <strong>Complete payment in:</strong>
-          <span id="checkout-timer" data-seconds="{{ remaining_seconds }}">
-            {{ remaining_seconds }}
-          </span>
-        </p>
+      <p>
+        <strong>Complete payment in:</strong>
+        <span id="checkout-timer"
+              data-seconds="{{ remaining_seconds }}">
+          {{ remaining_seconds }}
+        </span>
+      </p>
       {% endif %}
+
     </div>
 
-    <form method="POST">
-      {% csrf_token %}
-      <button type="submit" class="pay-btn">
-        Pay ₹{{ total }}
-      </button>
-    </form>
+    <button class="pay-btn" id="pay-btn">
+      Pay ₹{{ total }}
+    </button>
+
   </div>
 </div>
 
-<script>
-  const timerEl = document.getElementById("checkout-timer");
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 
-  if (timerEl) {
+<script>
+const payBtn = document.getElementById("pay-btn");
+
+function resetPayButton() {
+    payBtn.disabled = false;
+    payBtn.innerText = "Pay ₹{{ total }}";
+}
+
+payBtn.addEventListener("click", async function(e) {
+
+    e.preventDefault();
+
+    payBtn.disabled = true;
+    payBtn.innerText = "Processing...";
+
+    try {
+
+        const response = await fetch(
+            "/bookings/create_tournament_razorpay_order/{{ session.id }}/",
+            {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": "{{ csrf_token }}"
+                }
+            }
+        );
+
+        const data = await response.json();
+
+        if (!data.success) {
+
+            alert(data.message || "Something went wrong");
+
+            if (data.redirect) {
+                window.location.href = data.redirect;
+                return;
+            }
+
+            resetPayButton();
+            return;
+        }
+
+        const options = {
+
+            key: data.razorpay_key_id,
+            amount: data.amount,
+            currency: "INR",
+            name: data.ground_name,
+            description: "Tournament Booking",
+            order_id: data.razorpay_order_id,
+
+            prefill: {
+                name: "{{ request.user.get_full_name }}",
+                email: "{{ request.user.email }}"
+            },
+
+            theme: {
+                color: "#4CAF50"
+            },
+
+            handler: async function(response) {
+
+                try {
+
+                    await fetch(
+                        "/bookings/payment_success_razorpay/",
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "X-CSRFToken": "{{ csrf_token }}"
+                            },
+                            body: JSON.stringify({
+                                razorpay_payment_id:
+                                    response.razorpay_payment_id,
+
+                                razorpay_order_id:
+                                    response.razorpay_order_id,
+
+                                razorpay_signature:
+                                    response.razorpay_signature
+                            })
+                        }
+                    );
+
+                } catch(err) {
+                    console.error(err);
+                }
+
+                window.location.href =
+                    `/bookings/payment_waiting/${response.razorpay_order_id}/`;
+            },
+
+            modal: {
+                ondismiss: function() {
+                    resetPayButton();
+                }
+            }
+        };
+
+        const rzp = new Razorpay(options);
+
+        rzp.on("payment.failed", async function(response) {
+
+            try {
+
+                const failedResponse = await fetch(
+                    "/bookings/payment_success_razorpay/",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-CSRFToken": "{{ csrf_token }}"
+                        },
+                        body: JSON.stringify({
+                            error: true,
+                            razorpay_order_id:
+                                response.error.metadata.order_id
+                        })
+                    }
+                );
+
+                const failedData =
+                    await failedResponse.json();
+
+                if (failedData.redirect) {
+
+                    window.location.href =
+                        failedData.redirect;
+
+                    return;
+                }
+
+            } catch(err) {
+                console.error(err);
+            }
+
+            resetPayButton();
+        });
+
+        rzp.open();
+
+    } catch(err) {
+
+        console.error(err);
+
+        alert("Something went wrong");
+
+        resetPayButton();
+    }
+});
+
+const timerEl = document.getElementById("checkout-timer");
+
+if (timerEl) {
+
     let seconds = Number(timerEl.dataset.seconds || 0);
 
     function renderTimer() {
-      const mins = Math.floor(seconds / 60);
-      const secs = seconds % 60;
 
-      timerEl.textContent =
-        String(mins).padStart(2, "0") + ":" +
-        String(secs).padStart(2, "0");
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
 
-      if (seconds <= 0) {
-        window.location.reload();
-        return;
-      }
+        timerEl.textContent =
+            String(mins).padStart(2, "0")
+            + ":"
+            + String(secs).padStart(2, "0");
 
-      seconds -= 1;
+        if (seconds <= 0) {
+            window.location.reload();
+            return;
+        }
+
+        seconds -= 1;
     }
 
     renderTimer();
+
     setInterval(renderTimer, 1000);
-  }
+}
 </script>
+
 {% endblock %}

@@ -54,6 +54,7 @@ services:
     command: sh -c "python manage.py migrate && gunicorn --workers 1 --bind 0.0.0.0:8000 cricketstore.wsgi:application"
     volumes:
       - .:/app
+      - media_volume:/app/media
     ports:
       - "8000:8000"
     depends_on:
@@ -70,6 +71,7 @@ services:
       - REDIS_CACHE_URL=redis://redis:6379/1
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - HUGGINGFACEHUB_API_TOKEN=${HUGGINGFACEHUB_API_TOKEN}
+      - DEBUG=True
 
   kafka-consumer:
     build: .
@@ -95,3 +97,4 @@ volumes:
   postgres_data:
   es_data:
   kafka_data:
+  media_volume:

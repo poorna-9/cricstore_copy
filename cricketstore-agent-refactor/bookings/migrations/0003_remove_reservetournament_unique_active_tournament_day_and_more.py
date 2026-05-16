@@ -81,7 +81,14 @@ class Migration(migrations.Migration):
             field=models.CharField(choices=[('morning', 'Morning'), ('afternoon', 'Afternoon'), ('evening', 'Evening'), ('night', 'Night')], default='full_day'),
             preserve_default=False,
         ),
-        migrations.AlterField(
+        # Remove the FloatField 'session' and re-add as ForeignKey.
+        # AlterField cannot cast double precision -> uuid in PostgreSQL,
+        # so we drop and recreate instead.
+        migrations.RemoveField(
+            model_name='orders',
+            name='session',
+        ),
+        migrations.AddField(
             model_name='orders',
             name='session',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='bookings.tournamentsession'),

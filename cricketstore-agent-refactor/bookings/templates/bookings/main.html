@@ -35,6 +35,11 @@
                 <li class="nav-item">
                 <a class="nav-link" href="{% url 'bookingthroughagent' %}">Booking Agent</a>
                 </li>
+                {% if user.is_authenticated %}
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'my_bookings' %}">My Bookings</a>
+                </li>
+                {% endif %}
             </ul>
             <form class="form-inline my-2 my-lg-0" method="GET" action="{% url 'store' %}" id="navbar-search-form">
                 <input id="search-input" class="form-control mr-2" type="search" placeholder="AI-Search Venues" 

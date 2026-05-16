@@ -4,88 +4,214 @@
 {% block head %}
 <style>
 .checkout-container {
-  max-width: 700px;
-  margin: 40px auto;
-  padding: 20px;
+    max-width: 700px;
+    margin: 40px auto;
+    padding: 20px;
 }
 
 .checkout-card {
-  background: #fff;
-  padding: 25px;
-  border-radius: 12px;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+    background: #fff;
+    padding: 25px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.08);
 }
 
 .booking-summary ul {
-  list-style: none;
-  padding: 0;
+    list-style: none;
+    padding: 0;
 }
 
 .booking-summary li {
-  padding: 8px 0;
-  border-bottom: 1px solid #eee;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
 }
 
 .pay-btn {
-  width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, #4CAF50, #2ecc71);
-  border: none;
-  color: white;
-  font-size: 16px;
-  border-radius: 8px;
-  cursor: pointer;
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, #4CAF50, #2ecc71);
+    border: none;
+    color: white;
+    font-size: 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.2s;
 }
+
 .pay-btn:hover {
-  transform: scale(1.02);
+    transform: scale(1.02);
 }
+
+.pay-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
 .alert {
-  padding: 10px;
-  border-radius: 6px;
-  margin-bottom: 15px;
-  text-align: center;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 15px;
+    text-align: center;
 }
+
 .alert.cancel {
-  background: #fdecea;
-  color: #e74c3c;
+    background: #fdecea;
+    color: #e74c3c;
 }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="checkout-container">
-  <div class="checkout-card">
-    <h1>Checkout</h1>
-
-    {% if payment_status == "cancel" %}
-      <div class="alert cancel">
-        ❌ Payment cancelled. Try again.
-      </div>
-    {% endif %}
-
-    <div class="booking-summary">
-      <h3>Selected Slots</h3>
-      <ul>
-        {% for s in slots %}
-          <li>
-            {{ s.starttime|time:"h:i A" }} -
-            {{ s.endtime|time:"h:i A" }}
-            <strong>₹{{ s.price }}</strong>
-          </li>
-        {% endfor %}
-      </ul>
-
-      <p><strong>Ground:</strong> {{ ground.name }}</p>
-      <p><strong>Total:</strong> ₹{{ total }}</p>
+    <div class="checkout-card">
+        <h1>Checkout</h1>
+        {% if payment_status == "cancel" %}
+            <div class="alert cancel">
+                ❌ Payment cancelled. Try again.
+            </div>
+        {% endif %}
+        <div class="booking-summary">
+            <h3>Selected Slots</h3>
+            <ul>
+                {% for s in slots %}
+                    <li>
+                        {{ s.starttime|time:"h:i A" }} -
+                        {{ s.endtime|time:"h:i A" }}
+                        <strong>₹{{ s.price }}</strong>
+                    </li>
+                {% endfor %}
+            </ul>
+            <p>
+                <strong>Ground:</strong> {{ ground.name }}
+            </p>
+            <p>
+                <strong>Total:</strong> ₹{{ total }}
+            </p>
+        </div>
+        <button class="pay-btn" id="pay-btn">
+            Pay ₹{{ total }}
+        </button>
     </div>
-
-    <form method="POST">
-      {% csrf_token %}
-      <button type="submit" class="pay-btn">
-        Pay ₹{{ total }}
-      </button>
-    </form>
-
-  </div>
 </div>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+const payBtn = document.getElementById("pay-btn");
+
+function resetPayButton() {
+    payBtn.disabled = false;
+    payBtn.innerText = "Pay ₹{{ total }}";
+}
+
+payBtn.addEventListener("click", async function (e) {
+    e.preventDefault();
+    payBtn.disabled = true;
+    payBtn.innerText = "Processing...";
+
+    try {
+        const response = await fetch(
+            "/bookings/create_razorpay_order/{{ session.id }}/",
+            {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": "{{ csrf_token }}"
+                }
+            }
+        );
+        const data = await response.json();
+        if (!data.success) {
+            alert(data.message || "Something went wrong");
+            if (data.redirect) {
+                window.location.href = data.redirect;
+                return;
+            }
+            resetPayButton();
+            return;
+        }
+        const options = {
+            key: data.razorpay_key_id,
+            amount: data.amount,
+            currency: "INR",
+            name: data.ground_name,
+            description: "Slot Booking",
+            order_id: data.razorpay_order_id,
+            prefill: {
+                name: "{{ request.user.get_full_name }}",
+                email: "{{ request.user.email }}"
+            },
+            theme: {
+
+                color: "#4CAF50"
+            },
+            handler: async function (response) {
+                try {
+                    await fetch(
+                        "/bookings/payment_success_razorpay/",
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "X-CSRFToken": "{{ csrf_token }}"
+                            },
+                            body: JSON.stringify({
+                                razorpay_payment_id:
+                                    response.razorpay_payment_id,
+                                razorpay_order_id:
+                                    response.razorpay_order_id,
+                                razorpay_signature:
+                                    response.razorpay_signature
+                            })
+                        }
+                    );
+
+                } catch (err) {
+                    console.error(err);
+                }
+                window.location.href =
+                    `/bookings/payment_waiting/${response.razorpay_order_id}/`;
+            },
+            modal: {
+                ondismiss: function () {
+                    resetPayButton();
+                }
+            }
+        };
+        const rzp = new Razorpay(options);
+        rzp.on("payment.failed", async function (response) {
+            try {
+                const failedResponse = await fetch(
+                    "/bookings/payment_success_razorpay/",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-CSRFToken": "{{ csrf_token }}"
+                        },
+                        body: JSON.stringify({
+                            error: true,
+                            razorpay_order_id:
+                                response.error.metadata.order_id
+                        })
+                    }
+                );
+                const failedData =
+                    await failedResponse.json();
+                if (failedData.redirect) {
+                    window.location.href =
+                        failedData.redirect;
+                    return;
+                }
+            } catch (err) {
+                console.error(err);
+            }
+            resetPayButton();
+        });
+        rzp.open();
+    } catch (err) {
+        console.error(err);
+        alert("Something went wrong");
+        resetPayButton();
+    }
+});
+</script>
 {% endblock %}

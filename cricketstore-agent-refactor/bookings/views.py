@@ -26,7 +26,6 @@ from django.template.loader import render_to_string
 from .agent_state import get_agent_context, merge_agent_filters, normalize_required_fields, read_chat_payload, reset_agent_context
 import logging
 logger = logging.getLogger(__name__)
-import stripe
 from .redis_client import redis_client
 
 AFFIRMATIVE_REPLIES = {
@@ -657,8 +656,18 @@ def reservetournamentday(request):
             user=user,
             ground=ground,
         ).first()
-
-        if not session:
+        if session:
+            existing_session_key = f"tournament_session:{session.id}"
+            if not redis_client.exists(existing_session_key):
+                cancel_tournament_booking_session(session)
+                session = tournamentsession.objects.create(
+                    user=user,
+                    ground=ground,
+                    start_date=date_obj,
+                    end_date=date_obj,
+                    session_type=session_type,
+                )
+        else:
             session = tournamentsession.objects.create(
                 user=user,
                 ground=ground,
@@ -939,7 +948,16 @@ def reserveslot(request):
             ground=ground,
             date=date_obj,
         ).first()
-        if not session:
+        if session:
+            existing_session_key = f"session:{session.id}"
+            if not redis_client.exists(existing_session_key):
+                cancel_normal_booking_session(session)
+                session = reservationsession.objects.create(
+                    user=user,
+                    ground=ground,
+                    date=date_obj,
+                )
+        else:
             session = reservationsession.objects.create(
                 user=user,
                 ground=ground,
@@ -1145,42 +1163,33 @@ def tournamentcheckout(request, session_id):
         "evening": "t_evening_price",
         "night": "t_night_price",
     }
-
     t_session = get_object_or_404(
         tournamentsession,
         id=session_id,
         user=request.user,
     )
-
     reserved_days = (
         reservetournament.objects
         .filter(session=t_session, status="reserved")
         .prefetch_related("blocked_slots")
     )
-
     if not reserved_days.exists():
         return redirect("tournamentBookingPage", pk=t_session.ground_id)
-
     total_amount = 0
     slot_ids = []
-
     for rd in reserved_days:
         shifts_used = (
             rd.blocked_slots
             .values_list("shift", flat=True)
             .distinct()
         )
-
         for shift in shifts_used:
             price_field = PRICE_MAP.get(shift)
-
             if price_field:
                 total_amount += getattr(t_session.ground, price_field, 0) or 0
-
         slot_ids.extend(
             rd.blocked_slots.values_list("id", flat=True)
         )
-
     pay = (
         payment.objects.filter(
             user=request.user,
@@ -1190,114 +1199,252 @@ def tournamentcheckout(request, session_id):
         .order_by("-created_at")
         .first()
     )
-
     remaining_seconds = 0
-
     if pay and pay.expires_at:
         remaining_seconds = int((pay.expires_at - timezone.now()).total_seconds())
-
     if pay and remaining_seconds <= 0:
         cancel_tournament_booking_session(t_session)
         return redirect("grounds_page")
-
-    if request.method == "POST":
-        if not pay:
-            with transaction.atomic():
-                now = timezone.now()
-
-                pay = payment.objects.create(
-                    user=request.user,
-                    tournament_session=t_session,
-                    amount=total_amount,
-                    status=False,
-                    expires_at=now + timedelta(minutes=10)
-                )
-
-                for reservation in reserved_days:
-                    for slot in reservation.blocked_slots.all():
-                        Orders.objects.create(
-                            user=request.user,
-                            ground=t_session.ground,
-                            tournament_session=t_session,
-                            date=reservation.date,
-                            slotsbooked_id=slot.id,
-                            transaction_id=f"tournament_{pay.id}_{slot.id}",
-                            price=float(slot.price or 0),
-                            payment_status=False,
-                            booked=False,
-                            Tournament_or_normal="tournament",
-                        )
-
-            remaining_seconds = int((pay.expires_at - timezone.now()).total_seconds())
-
-        with transaction.atomic():
-            ok, message = lock_tournament_order_slots_for_payment(t_session)
-
-        if not ok:
-            cancel_tournament_booking_session(t_session)
-            return JsonResponse({
-                "success": False,
-                "message": message
-            }, status=409)
-
-        if pay.stripe_session_id and remaining_seconds > 0:
-            try:
-                checkout_session = stripe.checkout.Session.retrieve(
-                    pay.stripe_session_id
-                )
-                return redirect(checkout_session.url)
-            except Exception:
-                pass
-
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "inr",
-                    "product_data": {
-                        "name": f"{t_session.ground.name} Tournament Booking",
-                    },
-                    "unit_amount": int(total_amount * 100),
-                },
-                "quantity": 1,
-            }],
-            mode="payment",
-            success_url=request.build_absolute_uri(reverse("payment_success")) + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=request.build_absolute_uri(
-                reverse("tournamentcheckout", args=[t_session.id])
-            ) + "?payment=cancel",
-            metadata={
-                "payment_id": str(pay.id),
-                "session_id": str(t_session.id),
-                "user_id": str(request.user.id),
-                "slot_ids": json.dumps(slot_ids),
-                "type": "tournament",
-            }
-        )
-
-        pay.stripe_session_id = checkout_session.id
-        pay.save(update_fields=["stripe_session_id"])
-
-        return redirect(checkout_session.url)
-
     return render(request, "bookings/tournamentcheckout.html", {
         "session": t_session,
         "reserved": reserved_days,
         "total": total_amount,
         "ground": t_session.ground,
-        "remaining_seconds": remaining_seconds,
         "payment_status": request.GET.get("payment"),
     })
 
+@login_required
+def create_tournament_razorpay_order(request, session_id):
+    if request.method != "POST":
+        return JsonResponse({
+            "success": False,
+            "message": "Invalid request"
+        }, status=400)
+    PRICE_MAP = {
+        "morning": "t_morning_price",
+        "afternoon": "t_afternoon_price",
+        "evening": "t_evening_price",
+        "night": "t_night_price",
+    }
+    t_session = get_object_or_404(
+        tournamentsession,
+        id=session_id,
+        user=request.user,
+    )
+    reserved_days = (
+        reservetournament.objects
+        .filter(session=t_session, status="reserved")
+        .prefetch_related("blocked_slots")
+    )
+    if not reserved_days.exists():
+        return JsonResponse({
+            "success": False,
+            "redirect": "/bookings/grounds/",
+            "message": "No reserved slots found"
+        }, status=400)
+    total_amount = 0
+    slot_ids = []
+    for rd in reserved_days:
+        shifts_used = (
+            rd.blocked_slots
+            .values_list("shift", flat=True)
+            .distinct()
+        )
+        for shift in shifts_used:
+            price_field = PRICE_MAP.get(shift)
+            if price_field:
+                total_amount += getattr(t_session.ground, price_field, 0) or 0
+        slot_ids.extend(
+            rd.blocked_slots.values_list("id", flat=True)
+        )
+    existing_payment = (
+        payment.objects.filter(
+            user=request.user,
+            tournament_session=t_session,
+            status=False
+        ).order_by("-created_at").first())
+    if existing_payment:
+        remaining_seconds = int((existing_payment.expires_at - timezone.now()).total_seconds())
+        if remaining_seconds <= 0:
+            cancel_tournament_booking_session(t_session)
+            return JsonResponse({
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": "Previous payment expired"
+            }, status=400)
+        return JsonResponse({
+            "success": True,
+            "razorpay_order_id": existing_payment.razorpay_order_id,
+            "razorpay_key_id": settings.RAZORPAY_KEY_ID,
+            "amount": int(existing_payment.amount * 100),
+            "ground_name": t_session.ground.name,
+        })
+    try:
+        with transaction.atomic():
+            now = timezone.now()
+            pay = payment.objects.create(
+                user=request.user,
+                tournament_session=t_session,
+                amount=total_amount,
+                status=False,
+                expires_at=now + timedelta(minutes=10)
+            )
+            for reservation in reserved_days:
+                for slot in reservation.blocked_slots.all():
+                    Orders.objects.create(
+                        user=request.user,
+                        ground=t_session.ground,
+                        tournament_session=t_session,
+                        date=reservation.date,
+                        slotsbooked_id=slot.id,
+                        transaction_id=f"tournament_{pay.id}_{slot.id}",
+                        price=float(slot.price or 0),
+                        payment_status=False,
+                        booked=False,
+                        Tournament_or_normal="tournament",
+                    )
+            ok, message = lock_tournament_order_slots_for_payment(t_session)
+            if not ok:
+                raise ValueError(message)
+    except ValueError as e:
+        cancel_tournament_booking_session(t_session)
+        return JsonResponse({
+            "success": False,
+            "redirect": "/bookings/grounds/",
+            "message": str(e)
+        }, status=400)
+    try:
+        razorpay_order = (razorpay_client.order.create({
+            "amount": int(pay.amount * 100),
+            "currency": "INR",
+            "receipt": f"tournament_{pay.id}",
+            "notes":{
+                "payment_id": str(pay.id),
+                "session_id": str(t_session.id),
+                "user_id": str(request.user.id),
+                "slot_ids": json.dumps(slot_ids),
+                "type": "tournament",
+            },
+        }))
+    except Exception:
+        logger.exception( "Tournament Razorpay order creation failed")
+        cancel_tournament_booking_session(t_session)
+        return JsonResponse({"success": False, "message": "Payment gateway error" }, status=500)
+    pay.razorpay_order_id = razorpay_order.get("id")
+    pay.save(update_fields=["razorpay_order_id"])
+    return JsonResponse({
+        "success": True,
+        "razorpay_order_id": razorpay_order.get("id"),
+        "razorpay_key_id": settings.RAZORPAY_KEY_ID,
+        "amount": int(pay.amount * 100),
+        "ground_name": t_session.ground.name,
+    })
 
-
-
+def finalize_tournament_razorpay_payment(
+    pay,
+    razorpay_payment_id
+):
+    with transaction.atomic():
+        pay = (
+            payment.objects
+            .select_for_update()
+            .get(id=pay.id)
+        )
+        if pay.status:
+            return pay
+        pay.status = True
+        pay.razorpay_payment_id = (
+            razorpay_payment_id
+        )
+        pay.save(
+            update_fields=[
+                "status",
+                "razorpay_payment_id"
+            ]
+        )
+        order_qs = Orders.objects.filter(
+            tournament_session=
+                pay.tournament_session,
+            user=pay.user,
+            payment_status=False,
+            booked=False,
+            Tournament_or_normal=
+                "tournament",
+        )
+        slot_ids = list(
+            order_qs.values_list(
+                "slotsbooked_id",
+                flat=True
+            )
+        )
+        order_qs.update(
+            payment_status=True,
+            booked=True,
+            transaction_id=razorpay_payment_id
+        )
+        slot_objs = list(slots.objects.select_for_update().filter(id__in=slot_ids))
+        for slot in slot_objs:
+            slot.is_booked = True
+            slot.is_blocked = False
+            slot.blocked_at = None
+        slots.objects.bulk_update(slot_objs, ["is_booked", "is_blocked", "blocked_at"])
+        try:
+            tournament_session_id = str(pay.tournament_session.id)
+            session_key = f"tournament_session:{tournament_session_id}"
+            session_slots_key = f"tournament_session_slots:{tournament_session_id}"
+            redis_client.delete(session_key)
+            redis_client.delete(session_slots_key)
+            tournament_orders = (
+            Orders.objects.filter(
+                tournament_session=
+                    pay.tournament_session,
+                user=pay.user,
+                Tournament_or_normal=
+                    "tournament",
+            )
+            .select_related("ground")
+            )
+            for order in tournament_orders:
+                lock_key = (
+                f"lock:slot:"
+                f"{order.ground.id}:"
+                f"{order.slotsbooked_id}:"
+                f"{order.date}"
+                )
+                redis_client.delete(lock_key)
+            reserved_days = (
+            reservetournament.objects.filter(
+                session=pay.tournament_session
+            )
+            )
+            for rd in reserved_days:
+                day_lock_key = (
+                    f"tournament_day_lock:"
+                    f"{rd.ground.id}:"
+                    f"{rd.date}"
+                )
+                redis_client.delete(day_lock_key)
+        except Exception:
+            logger.exception("Failed to clear tournament redis locks")
+        try:
+            send_booking_event({
+                "event": "tournament_booking_confirmed",
+                "user_id": str(pay.user.id),
+                "payment_id": str(pay.id),
+                "razorpay_payment_id": razorpay_payment_id,
+                "amount": str(pay.amount),
+                "ground":str(pay.tournament_session.ground.name),
+            })
+        except Exception:
+            logger.exception("Failed to send tournament booking event")        
+    return pay
 
 
 from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+razorpay.api_key = settings.RAZORPAY_KEY_ID
+razorpay.api_secret = settings.RAZORPAY_SECRET_KEY
 
 from datetime import timedelta
 from django.conf import settings
@@ -1306,7 +1453,57 @@ from django.utils import timezone
 
 from .models import reservationsession, reservedslots, payment
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+def cancel_booking(booking):
+    with transaction.atomic():
+        booking = Bookings.objects.select_for_update().get(id=booking.id)
+        if booking.is_cancelled:
+            return
+        slot_ids = list(booking.slotsbooked.values_list("id", flat=True))
+        slot_objs = list(slots.objects.select_for_update().filter(id__in=slot_ids))
+        for slot in slot_objs:
+            slot.is_booked = False
+            slot.is_blocked = False
+            slot.blocked_at = None
+        slots.objects.bulk_update(slot_objs, ["is_booked", "is_blocked", "blocked_at"])
+        booking.booked = False
+        booking.is_cancelled = True
+        booking.save(update_fields=["booked", "is_cancelled"])
+        if booking.normal_session:
+            Orders.objects.filter(
+                normal_session=booking.normal_session,
+                user=booking.user,
+                booked=True,
+            ).update(
+                booked=False,
+                payment_status=False,
+            )
+        elif booking.tournament_session:
+            Orders.objects.filter(
+                tournament_session=booking.tournament_session,
+                user=booking.user,
+                booked=True,
+            ).update(
+                booked=False,
+                payment_status=False,
+            )
+
+@login_required
+def cancel_booking_view(request, booking_id):
+    booking = get_object_or_404(Bookings, id=booking_id, user=request.user)
+    cancel_booking(booking)
+    return redirect("booking_detail", booking_id=booking.id)
+
+def my_bookings(request):
+    bookings = (
+        Bookings.objects
+        .filter(user=request.user)
+        .select_related("ground")
+        .order_by("-created_at")
+    )
+    return render(request, "bookings/my_bookings.html", {
+        "bookings": bookings,
+    })
+
 
 def payment_success_page(request):
     return redirect("grounds_page")
@@ -1322,6 +1519,10 @@ def decode_redis_ids(raw_ids):
     return [int(s.decode() if isinstance(s, bytes) else s) for s in raw_ids]
 
 
+razorpay_client = razorpay.Client(
+    auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_SECRET_KEY)
+)
+
 @login_required
 def checkoutpage(request, session_id):
     session = get_object_or_404(
@@ -1333,18 +1534,16 @@ def checkoutpage(request, session_id):
         payment.objects.filter(
             session=session,
             user=request.user,
-            status = False
+            status=False
         )
         .order_by("-created_at")
         .first()
     )
-    remaining_seconds = 0
     if pay and pay.expires_at:
         remaining_seconds = int((pay.expires_at - timezone.now()).total_seconds())
-    if pay and remaining_seconds <= 0:
-        cancel_normal_booking_session(session)
-        return redirect("grounds_page")
-    
+        if remaining_seconds <= 0:
+            cancel_normal_booking_session(session)
+            return redirect("grounds_page")
     session_key = f"session:{session_id}"
     session_slots_key = f"session_slots:{session_id}"
     if not redis_client.exists(session_key):
@@ -1357,150 +1556,151 @@ def checkoutpage(request, session_id):
     slot_ids = decode_redis_ids(raw_slot_ids)
     slot_objs = list(
         slots.objects.filter(id__in=slot_ids)
-        .only("id", "price", "starttime", "endtime", "is_booked", "is_blocked")
+        .only("id", "price", "starttime", "endtime","is_blocked","is_booked")
     )
     total = sum(float(slot.price or 0) for slot in slot_objs)
-    if request.method == "POST":
-        if not pay:
-            with transaction.atomic():
-                now = timezone.now()
-                pay = payment.objects.create(
-                    user=request.user,
-                    session=session,
-                    amount=total,
-                    status = False,
-                    expires_at=now + timedelta(minutes=10)
-                )
-                for slot in slot_objs:
-                    Orders.objects.create(
-                        user=request.user,
-                        ground=session.ground,
-                        date=session.date,
-                        normal_session=session,
-                        slotsbooked_id=slot.id,
-                        transaction_id=f"normal_{pay.id}_{slot.id}",
-                        price=float(slot.price or 0),
-                        payment_status=False,
-                        booked=False,
-                        Tournament_or_normal="normal",
-                    )
-            remaining_seconds = int((pay.expires_at - timezone.now()).total_seconds())
-        with transaction.atomic():
-            ok, message = lock_normal_order_slots_for_payment(session)
-        if not ok:
-            cancel_normal_booking_session(session)
-            return JsonResponse({
-                "success": False,
-                "message": message
-            }, status=409)
-        if pay.stripe_session_id and remaining_seconds > 0:
-            try:
-                checkout_session = stripe.checkout.Session.retrieve(
-                    pay.stripe_session_id
-                )
-                return redirect(checkout_session.url)
-            except Exception:
-                pass
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "inr",
-                    "product_data": {
-                        "name": f"{session.ground.name} Booking",
-                    },
-                    "unit_amount": int(total * 100),
-                },
-                "quantity": 1,
-            }],
-            mode="payment",
-            success_url= request.build_absolute_uri(reverse("payment_success")) + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=request.build_absolute_uri(
-                reverse("checkout", args=[session.id])
-            ) + "?payment=cancel",
-            metadata={
-                "payment_id": str(pay.id),
-                "session_id": str(session.id),
-                "user_id": str(request.user.id),
-                "slot_ids": json.dumps(slot_ids),
-                "type": "normal",
-            }
-        )
-        pay.stripe_session_id = checkout_session.id
-        pay.save(update_fields=["stripe_session_id"])
-        return redirect(checkout_session.url)
     return render(request, "bookings/checkoutpage.html", {
         "session": session,
         "slots": slot_objs,
         "total": total,
         "ground": session.ground,
-        "remaining_seconds": remaining_seconds,
-        "payment_status": request.GET.get("payment"),
+        "payment_status":request.GET.get("payment"),
     })
 
-def finalize_stripe_checkout(checkout_session):
-    metadata = checkout_session.metadata
-    payment_id = metadata.get("payment_id")
-    booking_type = metadata.get("type")
-    slot_ids = json.loads(metadata.get("slot_ids", "[]"))
 
-    with transaction.atomic():
-        pay = payment.objects.select_for_update().get(id=payment_id)
+@login_required
+def booking_detail(request, booking_id):
+    booking = get_object_or_404(Bookings, id=booking_id, user=request.user)
+    slots_booked = booking.slotsbooked.all().order_by("starttime")
+    return render(request, "bookings/booking_detail.html", {
+        "booking": booking,
+        "slots": slots_booked,
+    })
 
-        if pay.status:
-            return pay
 
-        pay.status = True
-        pay.payment_id = checkout_session.payment_intent
-        pay.save(update_fields=["status", "payment_id"])
-
-        if booking_type == "normal":
-            Orders.objects.filter(
-                normal_session=pay.session,
-                user=pay.user,
-                payment_status=False,
-                booked=False,
-                Tournament_or_normal="normal",
-            ).update(
-                payment_status=True,
-                booked=True,
-                transaction_id=pay.payment_id
+@login_required
+def create_razorpay_order(request, session_id):
+    if request.method != "POST":
+        return JsonResponse({
+            "success": False,
+            "message": "Invalid request"
+        }, status=400)
+    session = get_object_or_404(
+        reservationsession,
+        id=session_id,
+        user=request.user
+    )
+    session_key = f"session:{session_id}"
+    session_slots_key = f"session_slots:{session_id}"
+    if not redis_client.exists(session_key):
+        cancel_normal_booking_session(session)
+        return JsonResponse({
+            "success": False,
+            "redirect": "/bookings/grounds/",
+            "message": "Session expired"
+        }, status=400)
+    raw_slot_ids = redis_client.smembers(session_slots_key)
+    if not raw_slot_ids:
+        cancel_normal_booking_session(session)
+        return JsonResponse({
+            "success": False,
+            "redirect": "/bookings/grounds/",
+            "message": "No slots selected"
+        }, status=400)
+    slot_ids = decode_redis_ids(raw_slot_ids)
+    slot_objs = list(
+        slots.objects.filter(id__in=slot_ids)
+        .only("id", "price", "starttime", "endtime")
+    )
+    total = sum(float(slot.price or 0) for slot in slot_objs)
+    existing_payment = (
+        payment.objects.filter(
+            session=session,
+            user=request.user,
+            status=False
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if existing_payment:
+        remaining_seconds = int((existing_payment.expires_at - timezone.now()).total_seconds())
+        if remaining_seconds <= 0:
+            cancel_normal_booking_session(session)
+            return JsonResponse({
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": "Previous payment expired"
+            }, status=400)
+        return JsonResponse({
+            "success": True,
+            "razorpay_order_id":existing_payment.razorpay_order_id,
+            "razorpay_key_id":settings.RAZORPAY_KEY_ID,
+            "amount": int(existing_payment.amount * 100),
+            "ground_name":session.ground.name,
+        })
+    try:
+        with transaction.atomic():
+            now = timezone.now()
+            pay = payment.objects.create(
+            user=request.user,
+            session=session,
+            amount=total,
+            status=False,
+            expires_at=now + timedelta(minutes=10)
             )
-
-            slots.objects.filter(id__in=slot_ids).update(
-                is_booked=True,
-                is_blocked=False,
-                blocked_at=None
-            )
-
-        elif booking_type == "tournament":
-            Orders.objects.filter(
-                tournament_session=pay.tournament_session,
-                user=pay.user,
-                payment_status=False,
-                booked=False,
-                Tournament_or_normal="tournament",
-            ).update(
-                payment_status=True,
-                booked=True,
-                transaction_id=pay.payment_id
-            )
-
-            slots.objects.filter(id__in=slot_ids).update(
-                is_booked=True,
-                is_blocked=False,
-                blocked_at=None
-            )
-
-    if booking_type == "normal" and pay.session:
-        redis_client.delete(f"session:{pay.session.id}")
-        redis_client.delete(f"session_slots:{pay.session.id}")
-
-    elif booking_type == "tournament" and pay.tournament_session:
-        redis_client.delete(f"tournament_session:{pay.tournament_session.id}")
-        redis_client.delete(f"tournament_session_slots:{pay.tournament_session.id}")
-
-    return pay
+            for slot in slot_objs:
+                Orders.objects.create(
+                    user=request.user,
+                    ground=session.ground,
+                    date=session.date,
+                    normal_session=session,
+                    slotsbooked_id=slot.id,
+                    transaction_id=f"normal_{pay.id}_{slot.id}",
+                    price=float(slot.price or 0),
+                    payment_status=False,
+                    booked=False,
+                    Tournament_or_normal="normal",
+                )
+            ok,message = lock_normal_order_slots_for_payment(session)
+            if not ok:
+                raise ValueError(message)
+    except ValueError as e:
+        cancel_normal_booking_session(session)
+        return JsonResponse({
+            "success": False,
+            "message": str(e)
+        }, status=409)
+    try:
+        razorpay_order = razorpay_client.order.create(
+            {
+                "amount": int(total * 100),
+                "currency": "INR",
+                "receipt": f"pay_{pay.id}",
+                "notes": {
+                    "payment_id": str(pay.id),
+                    "session_id": str(session.id),
+                    "user_id": str(request.user.id),
+                    "slot_ids": json.dumps(slot_ids),
+                    "type": "normal",
+                },
+            }
+        )
+    except Exception:
+        logger.exception("Razorpay order creation failed")
+        cancel_normal_booking_session(session)
+        return JsonResponse(
+            {"success": False, "message": "Payment gateway error. Please try again."},
+            status=502,
+        )
+    pay.razorpay_order_id = razorpay_order["id"]
+    pay.save(update_fields=["razorpay_order_id"])
+    return JsonResponse({
+        "success": True,
+        "razorpay_order_id": razorpay_order["id"],
+        "razorpay_key_id": settings.RAZORPAY_KEY_ID,
+        "amount": int(total * 100),
+        "ground_name": session.ground.name,
+    })
 
 
 def lock_normal_order_slots_for_payment(session):
@@ -1512,11 +1712,7 @@ def lock_normal_order_slots_for_payment(session):
             booked=False,
         )
     )
-    slot_ids = [
-        order.slotsbooked_id
-        for order in order_objs
-        if order.slotsbooked_id
-    ]
+    slot_ids = [o.slotsbooked_id for o in order_objs if o.slotsbooked_id]
     if not slot_ids:
         return False, "No order slots found"
     locked_slots = list(
@@ -1527,9 +1723,11 @@ def lock_normal_order_slots_for_payment(session):
     now = timezone.now()
     for slot in locked_slots:
         if slot.is_booked:
-            return False, "One or more slots are already booked"
+            logger.warning("Slot %d is already booked", slot.id)
+            return False, "One or more slots are already booked"      
         if slot.is_blocked:
-            continue
+            logger.warning("Slot %d is currently locked", slot.id)
+            return False, "Slot currently locked"
         slot.is_blocked = True
         slot.blocked_at = now
     slots.objects.bulk_update(locked_slots, ["is_blocked", "blocked_at"])
@@ -1539,89 +1737,202 @@ def lock_normal_order_slots_for_payment(session):
 
 from .kafka_producer import send_booking_event
 
-@csrf_exempt
-def payment_success_stripe(request):
-    payload = request.body
-    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
-
-    try:
-        event = stripe.Webhook.construct_event(
-            payload,
-            sig_header,
-            settings.STRIPE_WEBHOOK_SECRET
-        )
-    except Exception:
-        return HttpResponse(status=400)
-
-    if event["type"] == "checkout.session.completed":
-        checkout_session = event["data"]["object"]
-
-        try:
-            finalize_stripe_checkout(checkout_session)
-        except Exception:
-            logger.exception("Stripe webhook finalize failed")
-            return HttpResponse(status=500)
-
-    return HttpResponse(status=200)
-
-
-import hmac
-import hashlib
-
-def verifysignature(order_id, payment_id, signature):
-    generated_signature = hmac.new(
-        key=bytes(settings.RAZORPAY_KEY_SECRET, 'utf-8'),
-        msg=bytes(order_id + "|" + payment_id, 'utf-8'),
-        digestmod=hashlib.sha256
-    ).hexdigest()
-    return generated_signature == signature
 
 from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import render
-import stripe
 import json
 
+
 @csrf_exempt
-def payment_success(request):
-    stripe_session_id = request.GET.get("session_id")
-
-    if not stripe_session_id:
-        return JsonResponse({
-            "success": False,
-            "message": "Missing Stripe session id"
-        }, status=400)
-
+def payment_success_razorpay_webhook(request):
+    payload = request.body
+    sig = request.META.get("HTTP_X_RAZORPAY_SIGNATURE")
     try:
-        checkout_session = stripe.checkout.Session.retrieve(stripe_session_id)
+        razorpay_client.utility.verify_webhook_signature(
+            payload.decode(),
+            sig,
+            settings.RAZORPAY_WEBHOOK_SECRET
+        )
+    except Exception:
+        return HttpResponse(status=400)
+    event = json.loads(payload)
+    if event.get("event") == "payment.captured":
+        payment_entity = event["payload"]["payment"]["entity"]
+        razorpay_order_id = payment_entity.get("order_id")
+        razorpay_payment_id = payment_entity.get("id")
+        try:
+            pay = payment.objects.get(razorpay_order_id=razorpay_order_id)
+            if pay.session:
+               finalize_razorpay_payment(pay, razorpay_payment_id)
+            elif pay.tournament_session:
+               finalize_tournament_razorpay_payment(pay, razorpay_payment_id)
+        except Exception:
+            logger.exception("Razorpay webhook finalize failed")
+            return HttpResponse(status=500)
+    elif event.get("event") == "payment.failed":
+        payment_entity = event["payload"]["payment"]["entity"]
+        razorpay_order_id = payment_entity.get("order_id")
+        try:
+            pay = payment.objects.get(razorpay_order_id=razorpay_order_id)
+            remaining_seconds = int((pay.expires_at - timezone.now()).total_seconds())
+            if remaining_seconds <= 0:
+                if pay.session:
+                   cancel_normal_booking_session(pay.session)
+                if pay.tournament_session:
+                   cancel_tournament_booking_session(pay.tournament_session)
+                logger.info("Razorpay payment failed for order %s", razorpay_order_id)
+        except Exception:
+            logger.exception("Razorpay payment failed handler error")
+    return HttpResponse(status=200)
 
-        if checkout_session.payment_status != "paid":
+
+@login_required
+def payment_waiting_page(request, razorpay_order_id):
+    pay = get_object_or_404(payment, razorpay_order_id=razorpay_order_id, user=request.user)
+    return render(
+        request,
+        "bookings/payment_waiting.html",
+        {"razorpay_order_id": pay.razorpay_order_id},
+    )
+    
+@login_required
+def check_payment_status(request, razorpay_order_id):
+    try:
+        pay = payment.objects.get(razorpay_order_id=razorpay_order_id, user=request.user)
+        if pay.status:
+            booking = Bookings.objects.filter(
+                user=pay.user,
+                normal_session=pay.session,
+                tournament_session=pay.tournament_session,
+                payment_status=True,
+            ).order_by("-created_at").first()
+            if not booking:
+                return JsonResponse({"status": "pending"})
             return JsonResponse({
-                "success": False,
-                "message": "Payment not completed"
-            }, status=400)
-
-        pay = finalize_stripe_checkout(checkout_session)
-
-        return render(request, "bookings/payment_success.html", {
-            "payment": pay
-        })
-
+                "status": "success",
+                "redirect": f"/bookings/booking/{booking.id}/"
+            })
+        remaining_seconds = int((pay.expires_at - timezone.now()).total_seconds())
+        if remaining_seconds <= 0:
+            if pay.session:
+               cancel_normal_booking_session(pay.session)
+            if pay.tournament_session:
+               cancel_tournament_booking_session(pay.tournament_session)
+            return JsonResponse({"status": "expired", "redirect": "/bookings/grounds/"})
+        return JsonResponse({"status": "pending"})
     except payment.DoesNotExist:
+        return JsonResponse({"status": "failed", "redirect": "/bookings/grounds/"})
+    except Exception:
+        logger.exception("check_payment_status error")
+        return JsonResponse({"status": "failed", "redirect": "/bookings/grounds/"})
+
+def finalize_razorpay_payment(pay, razorpay_payment_id):
+    with transaction.atomic():
+        pay = payment.objects.select_for_update().get(id=pay.id)
+        if pay.status:
+            return pay
+        pay.status = True
+        pay.razorpay_payment_id = razorpay_payment_id
+        pay.save(update_fields=["status", "razorpay_payment_id"])
+        slot_ids = list(
+            Orders.objects.filter(
+                normal_session=pay.session,
+                user=pay.user,
+                payment_status=False,
+                booked=False,
+                Tournament_or_normal="normal",
+            ).values_list("slotsbooked_id", flat=True)
+        )
+        Orders.objects.filter(
+            normal_session=pay.session,
+            user=pay.user,
+            payment_status=False,
+            booked=False,
+            Tournament_or_normal="normal",
+        ).update(
+            payment_status=True,
+            booked=True,
+            transaction_id=razorpay_payment_id
+        )
+        slots.objects.filter(id__in=slot_ids).update(
+            is_booked=True,
+            is_blocked=False,
+            blocked_at=None
+        )
+    if pay.session:
+        redis_client.delete(f"session:{pay.session.id}")
+        redis_client.delete(f"session_slots:{pay.session.id}")
+    try:
+        send_booking_event({
+            "event": "payment_success",
+            "user_id": str(pay.user.id),
+            "payment_id": str(pay.id),
+            "razorpay_payment_id": razorpay_payment_id,
+            "amount": str(pay.amount),
+            "ground": str(pay.session.ground.name),
+            "date": str(pay.session.date),
+        })
+    except Exception:
+        logger.exception("Failed to send booking event")
+    return pay
+
+@csrf_exempt
+@login_required
+def payment_success_razorpay(request):
+    if request.method != "POST":
+        return JsonResponse({"success": False}, status=405)
+    data = json.loads(request.body)
+    razorpay_payment_id = data.get("razorpay_payment_id")
+    razorpay_order_id = data.get("razorpay_order_id")
+    razorpay_signature = data.get("razorpay_signature")
+    error = data.get("error") 
+    if error:
+        try:
+            pay = payment.objects.get(razorpay_order_id=razorpay_order_id,user=request.user)
+            remaining_seconds = int((pay.expires_at - timezone.now()).total_seconds())
+            if remaining_seconds > 0:
+                if pay.session: 
+                    return JsonResponse({
+                        "success": False,
+                        "redirect": f"/bookings/checkout/{pay.session.id}/?payment=cancel"
+                    })
+                if pay.tournament_session:
+                    return JsonResponse({
+                        "success": False,
+                        "redirect": f"/bookings/tournamentcheckout/{pay.tournament_session.id}/?payment=cancel"
+                    })
+            if pay.session:
+               cancel_normal_booking_session(pay.session)
+            if pay.tournament_session:
+               cancel_tournament_booking_session(pay.tournament_session)
+
+        except Exception:
+            pass
         return JsonResponse({
             "success": False,
-            "message": "Payment not found"
-        }, status=404)
-
-    except Exception as e:
-        logger.exception("Stripe payment success error")
-        return JsonResponse({
-            "success": False,
-            "message": str(e)
-        }, status=500)
-
-        
+            "redirect": "/bookings/grounds/"
+        })
+    try:
+        razorpay_client.utility.verify_payment_signature({
+            "razorpay_order_id": razorpay_order_id,
+            "razorpay_payment_id": razorpay_payment_id,
+            "razorpay_signature": razorpay_signature,
+        })
+    except Exception:
+        return JsonResponse({"success": False, "message": "Invalid signature"})
+    try:
+        pay = payment.objects.get(razorpay_order_id=razorpay_order_id,user=request.user)
+        if pay.session:
+           finalize_razorpay_payment(pay, razorpay_payment_id)
+        if pay.tournament_session:
+            finalize_tournament_razorpay_payment(pay, razorpay_payment_id)
+        return JsonResponse({"success": True})
+    except Exception:
+        logger.exception("Razorpay finalize failed")
+        return JsonResponse({"success": False, "message": "Finalization failed"})
+       
 def get_lat_long(address):
     api_key = "pk.9a6225b4ea47b4e24c62938d1d821a4f"
     url = "https://us1.locationiq.com/v1/search"

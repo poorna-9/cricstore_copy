@@ -176,6 +176,7 @@ class Orders(models.Model):
         return f"{self.user.username} - {self.ground.name} on {self.date}"
    
 class Bookings(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     ground = models.ForeignKey(Ground, on_delete=models.CASCADE)
     date = models.DateField()
@@ -185,9 +186,12 @@ class Bookings(models.Model):
     price = models.FloatField(default=0.0)
     payment_status = models.BooleanField(default=False)
     refund_amount = models.FloatField(default=0.0)
-    cancel_reason = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_cancelled = models.BooleanField(default=False)
+    tournament_session = models.ForeignKey(tournamentsession, on_delete=models.SET_NULL, null=True, blank=True)
+    normal_session = models.ForeignKey(reservationsession, on_delete=models.SET_NULL, null=True, blank=True)
+    Tournament_or_normal = models.CharField(max_length=20, default='normal')
     
 
 class reservedslots(models.Model):
@@ -218,22 +222,9 @@ class payment(models.Model):
         null=True,
         blank=True
     )
-    order_id = models.CharField(max_length=100, null=True, blank=True)
-    payment_id = models.CharField(max_length=100, null=True, blank=True)
-    stripe_session_id = models.CharField(max_length=255, null=True, blank=True)
+    razorpay_order_id = models.CharField(max_length=100, null=True, blank=True)
+    razorpay_payment_id = models.CharField(max_length=100, null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
-
     amount = models.FloatField()
     status = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-
-class Booking(models.Model):
-    booking_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    order = models.OneToOneField(payment, on_delete=models.CASCADE)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    ground = models.ForeignKey(Ground, on_delete=models.CASCADE)
-    date = models.DateField()
-    slots = models.ManyToManyField(slots)
-    total_price = models.FloatField(default=0.0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    

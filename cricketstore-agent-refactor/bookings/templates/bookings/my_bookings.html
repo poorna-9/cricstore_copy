@@ -1,0 +1,217 @@
+{% extends 'bookings/main.html' %}
+{% load static %}
+
+{% block head %}
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap');
+
+    :root {
+        --green: #1a9e5c;
+        --green-light: #e6f7ef;
+        --red: #e03c3c;
+        --red-light: #fdecea;
+        --text: #1a1a2e;
+        --muted: #6b7280;
+        --border: #ececec;
+        --bg: #f6f7fb;
+        --card-bg: #ffffff;
+    }
+
+    body {
+        background: var(--bg);
+        font-family: 'DM Sans', sans-serif;
+        color: var(--text);
+    }
+
+    .mb-wrapper {
+        max-width: 780px;
+        margin: 48px auto;
+        padding: 0 20px 60px;
+    }
+
+    .mb-heading {
+        font-family: 'Syne', sans-serif;
+        font-size: 26px;
+        font-weight: 700;
+        margin-bottom: 6px;
+    }
+
+    .mb-subtext {
+        font-size: 14px;
+        color: var(--muted);
+        margin-bottom: 28px;
+    }
+
+    .mb-empty {
+        text-align: center;
+        padding: 60px 20px;
+        background: var(--card-bg);
+        border-radius: 16px;
+        box-shadow: 0 2px 24px rgba(0,0,0,0.06);
+    }
+
+    .mb-empty p {
+        font-size: 15px;
+        color: var(--muted);
+        margin-bottom: 16px;
+    }
+
+    .mb-empty a {
+        display: inline-block;
+        padding: 11px 24px;
+        background: var(--green);
+        color: #fff;
+        border-radius: 10px;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .mb-card {
+        background: var(--card-bg);
+        border-radius: 14px;
+        box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+        margin-bottom: 14px;
+        text-decoration: none;
+        color: inherit;
+        display: block;
+        transition: transform 0.15s, box-shadow 0.15s;
+        overflow: hidden;
+    }
+
+    .mb-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 24px rgba(0,0,0,0.1);
+    }
+
+    .mb-card-inner {
+        display: flex;
+        align-items: center;
+        padding: 18px 20px;
+        gap: 16px;
+    }
+
+    .mb-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: var(--green-light);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+
+    .mb-icon.cancelled {
+        background: var(--red-light);
+    }
+
+    .mb-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .mb-ground {
+        font-family: 'Syne', sans-serif;
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--text);
+        margin: 0 0 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .mb-meta {
+        font-size: 13px;
+        color: var(--muted);
+        margin: 0;
+    }
+
+    .mb-right {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .mb-price {
+        font-family: 'Syne', sans-serif;
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--green);
+    }
+
+    .mb-badge {
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .mb-badge.confirmed {
+        background: var(--green-light);
+        color: var(--green);
+    }
+
+    .mb-badge.cancelled {
+        background: var(--red-light);
+        color: var(--red);
+    }
+
+    .mb-arrow {
+        color: var(--muted);
+        font-size: 16px;
+        margin-left: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mb-wrapper">
+
+    <h1 class="mb-heading">My Bookings</h1>
+    <p class="mb-subtext">{{ bookings.count }} booking{{ bookings.count|pluralize }} found</p>
+
+    {% if bookings %}
+        {% for booking in bookings %}
+        <a href="{% url 'booking_detail' booking.id %}" class="mb-card">
+            <div class="mb-card-inner">
+
+                <div class="mb-icon {% if booking.is_cancelled %}cancelled{% endif %}">
+                    {% if booking.is_cancelled %}❌{% else %}🏟️{% endif %}
+                </div>
+
+                <div class="mb-info">
+                    <p class="mb-ground">{{ booking.ground.name }}</p>
+                    <p class="mb-meta">
+                        {{ booking.date|date:"d M Y" }} &nbsp;·&nbsp;
+                        {{ booking.Tournament_or_normal|capfirst }} &nbsp;·&nbsp;
+                        {{ booking.slotsbooked.count }} slot{{ booking.slotsbooked.count|pluralize }}
+                    </p>
+                </div>
+
+                <div class="mb-right">
+                    <span class="mb-price">₹{{ booking.price }}</span>
+                    <span class="mb-badge {% if booking.is_cancelled %}cancelled{% else %}confirmed{% endif %}">
+                        {% if booking.is_cancelled %}Cancelled{% else %}Confirmed{% endif %}
+                    </span>
+                </div>
+
+                <span class="mb-arrow">›</span>
+
+            </div>
+        </a>
+        {% endfor %}
+
+    {% else %}
+        <div class="mb-empty">
+            <p>You have no bookings yet.</p>
+            <a href="{% url 'grounds_page' %}">Browse Grounds</a>
+        </div>
+    {% endif %}
+
+</div>
+{% endblock %}
