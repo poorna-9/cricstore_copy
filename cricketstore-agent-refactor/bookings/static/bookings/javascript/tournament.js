@@ -1,46 +1,34 @@
 document.addEventListener("DOMContentLoaded", function () {
-    const container = document.getElementById("date-grid");
+    const table = document.getElementById("shift-table");
     const sessionIdInput = document.getElementById("sessionIdInput");
-    const checkoutForm = document.getElementById("tournamentCheckoutForm"); 
-    const slottype=document.getElementById("slot-type-box")
+    const checkoutForm = document.getElementById("tournamentCheckoutForm");
 
-    if (!container) {
-        console.error("Missing slots container or date input");
-        return;
-    }
+    if (!table) return;
 
-    const groundId = container.dataset.groundid;
-    console.log("Ground ID:", groundId);
+    const groundId = table.dataset.groundid;
     let sessionId = null;
 
-    function getSelectedSlotType() {
-        const el=document.querySelector('input[name="slot_type"]:checked');
-        if (!el){
-            alert("Please select slot type");
-            throw new Error("Slot type not selected");
-        }
-        return el.value
-    }
-    function setDateClass(el, cls) {
-        el.classList.remove("available", "reserved", "my-reserved", "booked");
-        el.classList.add(cls);
+    function setShiftClass(cell, cls) {
+        cell.classList.remove("available", "my-reserved", "others-reserved", "booked");
+        cell.classList.add(cls);
     }
 
-    container.addEventListener("click", function (e) {
-        const dateBox = e.target.closest(".date-card"); 
-        if (!dateBox) return;
+    // Click handler
+    table.addEventListener("click", function (e) {
+        const cell = e.target.closest(".shift-cell");
+        if (!cell) return;
 
-        if (dateBox.classList.contains("booked") ||
-            (dateBox.classList.contains("reserved") && !dateBox.classList.contains("my-reserved"))) {
-            return;
-        }
+        if (cell.classList.contains("others-reserved") ||
+            cell.classList.contains("booked")) return;
 
-        const dateValue = dateBox.dataset.date;
-        const slotType = getSelectedSlotType();
+        const dateValue = cell.dataset.date;
+        const shiftValue = cell.dataset.shift;
+
         const body = new URLSearchParams();
         body.append("ground_id", groundId);
         body.append("date", dateValue);
-        body.append("session_type", slotType);
+        body.append("session_type", shiftValue);
+
         fetch("/bookings/reservetournamentday/", {
             method: "POST",
             headers: {
@@ -55,64 +43,59 @@ document.addEventListener("DOMContentLoaded", function () {
                 alert(data.message || "Something went wrong");
                 return;
             }
-
             if (data.session_id) {
                 sessionId = data.session_id;
                 sessionIdInput.value = sessionId;
             }
-
             if (data.action === "selected") {
-                setDateClass(dateBox, "my-reserved");
+                setShiftClass(cell, "my-reserved");
             } else {
-                setDateClass(dateBox, "available");
+                setShiftClass(cell, "available");
             }
         })
         .catch(err => console.error("Fetch error:", err));
     });
 
+    // Checkout
     checkoutForm.addEventListener("submit", function (e) {
         if (!sessionId) {
             e.preventDefault();
-            alert("Please select at least one date to proceed to checkout.");
+            alert("Please select at least one shift to proceed.");
+            return;
         }
-        this.action=`/bookings/tournamentcheckout/${sessionId}/`;
+        this.action = `/bookings/tournamentcheckout/${sessionId}/`;
     });
 
-    function refreshreserveddays(){
+    // Refresh every 5 seconds
+    function refreshReservedShifts() {
         fetch(`/bookings/gettournamentreserveddays/?ground_id=${groundId}`)
         .then(res => res.json())
         .then(data => {
-            const userReserved = new Set((data.user_reserved || []).map(String));
-            const othersReserved = new Set((data.others_reserved || []).map(String));
-            const bookedSet = new Set((data.booked || []).map(String));
-            console.log({
-                  booked: bookedSet,
-                  userReserved: userReserved,
-                  othersReserved: othersReserved
+            const userReserved = data.user_reserved || {};
+            const othersReserved = data.others_reserved || {};
+            const bookedData = data.booked || {};
+
+            table.querySelectorAll("tr[data-date]").forEach(row => {
+                const dateStr = row.dataset.date;
+
+                row.querySelectorAll(".shift-cell").forEach(cell => {
+                    const shift = cell.dataset.shift;
+
+                    if (bookedData[dateStr]?.includes(shift)) {
+                        setShiftClass(cell, "booked");
+                    } else if (userReserved[dateStr]?.includes(shift)) {
+                        setShiftClass(cell, "my-reserved");
+                    } else if (othersReserved[dateStr]?.includes(shift)) {
+                        setShiftClass(cell, "others-reserved");
+                    } else {
+                        setShiftClass(cell, "available");
+                    }
                 });
-            container.querySelectorAll(".date-card").forEach(datebox => { 
-                const id = datebox.dataset.date;
-                if (bookedSet.has(id)){
-                    setDateClass(datebox,"booked");
-                }
-                else if(userReserved.has(id)){
-                    setDateClass(datebox,"my-reserved");
-                }
-                else if(othersReserved.has(id)){
-                    setDateClass(datebox,"reserved");
-                }
-                else if (
-                   !datebox.classList.contains("reserved") &&
-                   !datebox.classList.contains("my-reserved") &&
-                   !datebox.classList.contains("booked")
-                ) {
-                  setDateClass(datebox, "available");
-                }
             });
         })
         .catch(err => console.error(err));
     }
 
-    refreshreserveddays();
-    setInterval(refreshreserveddays, 5000);
+    refreshReservedShifts();
+    setInterval(refreshReservedShifts, 5000);
 });

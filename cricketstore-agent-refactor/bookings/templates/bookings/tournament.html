@@ -4,8 +4,8 @@
 {% block head %}
 <link rel="stylesheet" href="{% static 'bookings/css/tournament.css' %}">
 {% endblock head %}
-{% block content %}
 
+{% block content %}
 <div class="ground-detail-container tournament-page">
 
     <div class="ground-info">
@@ -13,75 +13,65 @@
         <div class="ground-text">
             <h2>{{ ground.name }}</h2>
             <p>{{ ground.address }}</p>
-
             <div class="rating-stars">
                 {% for i in "12345" %}
-                    {% if forloop.counter <= ground.rating %}
-                        ⭐
-                    {% else %}
-                        ☆
+                    {% if forloop.counter <= ground.rating %} ⭐
+                    {% else %} ☆
                     {% endif %}
                 {% endfor %}
                 <span>({{ ground.rating }}/5)</span>
             </div>
-
-            <p class="ground-price">
-                <p>Morning: ₹{{ ground.t_morning_price }}</p>
-                <p>Afternoon: ₹{{ ground.t_afternoon_price }}</p>
-                <p>Evening: ₹{{ ground.t_evening_price }}</p>
-                <p>Night: ₹{{ ground.t_night_price }}</p>
-                <p><strong>Full Day: ₹{{ ground.t_fullday_price }}</strong></p>
-            </p>
+            <p>Morning: ₹{{ ground.t_morning_price }}</p>
+            <p>Afternoon: ₹{{ ground.t_afternoon_price }}</p>
+            <p>Evening: ₹{{ ground.t_evening_price }}</p>
+            <p>Night: ₹{{ ground.t_night_price }}</p>
         </div>
     </div>
-    <div id="slot-type-box" class="slot-type-box">
-        <h3>Select Time Slot</h3>
-        <label><input type="radio" name="slot_type" value="full_day" checked> Full Day</label>
-        <label><input type="radio" name="slot_type" value="morning"> Morning</label>
-        <label><input type="radio" name="slot_type" value="evening"> Afternoon</label>
-        <label><input type="radio" name="slot_type" value="night"> Evening</label>
-    </div>
 
-    <h2 class="text-center mt-3">
-        Tournament Availability (Next 30 Days)
-    </h2>
-
-    <div  id="date-grid" class="date-grid"
-         data-groundid="{{ ground.id }}"
-         data-userid="{{ request.user.id }}">
-
-        {% for d in dates %}
-            {% if d.date in booked %}
-                <div class="date-card booked" data-date="{{ d.date|date:'Y-m-d' }}">
-            {% elif d.date in userreserveddates %}
-                <div class="date-card my-reserved" data-date="{{ d.date|date:'Y-m-d' }}">
-            {% elif d.date in reserved %}
-                <div class="date-card reserved" data-date="{{ d.date|date:'Y-m-d' }}" >
-            {% else %}
-                <div class="date-card available" data-date="{{ d.date|date:'Y-m-d' }}">
-            {% endif %}
-                    <span class="display-date">{{ d.date|date:"M d, Y" }}</span>
-                    <span class="day-num">{{ d.day_num }}</span>
-                </div>
-        {% endfor %}
-    </div>
+    <h2 class="text-center mt-3">Tournament Availability (Next 30 Days)</h2>
 
     <div class="legend">
-    <span style="display:inline-block;width:14px;height:14px;background:#28a745;margin-right:6px;"></span> Available
-    <span style="display:inline-block;width:14px;height:14px;background:#ffc107;margin:0 6px;"></span> Your Reserved
-    <span style="display:inline-block;width:14px;height:14px;background:#6c757d;margin:0 6px;"></span> Booked
-    <span style="display:inline-block;width:14px;height:14px;background:#17a2b8;margin:0 6px;"></span> Reserved
-</div>
+        <span class="legend-box available"></span> Available
+        <span class="legend-box my-reserved"></span> Your Reserved
+        <span class="legend-box others-reserved"></span> Others Reserved
+        <span class="legend-box booked"></span> Booked
+    </div>
+
+    <div class="shift-grid-wrapper">
+        <table class="shift-table" id="shift-table" data-groundid="{{ ground.id }}">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Morning</th>
+                    <th>Afternoon</th>
+                    <th>Evening</th>
+                    <th>Night</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in dates %}
+                <tr data-date="{{ d.date|date:'Y-m-d' }}">
+                    <td class="date-label">{{ d.date|date:"M d, Y" }}</td>
+                    {% for shift in shifts %}
+                    <td class="shift-cell available"
+                        data-date="{{ d.date|date:'Y-m-d' }}"
+                        data-shift="{{ shift }}">
+                        {{ shift|capfirst }}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 
     <form method="POST" id="tournamentCheckoutForm" class="text-center mt-4">
         {% csrf_token %}
         <input type="hidden" name="session_id" id="sessionIdInput">
-        <input type="hidden" name="selected_tournament_day" id="selectedDateInput">
         <button class="btn-booknow">Book</button>
     </form>
 
 </div>
-
 {% endblock content %}
 
 {% block extra_js %}

@@ -640,8 +640,8 @@ def reservetournamentday(request):
             "afternoon": ["afternoon"],
             "evening": ["evening"],
             "night": ["night"],
-            "full_day": ["morning", "afternoon", "evening", "night"],
         }
+        shifts_to_lock = SHIFT_MAP[session_type]
         if session_type not in SHIFT_MAP:
             return JsonResponse({"success": False, "message": "Invalid session type"})
         session = tournamentsession.objects.filter(
@@ -671,7 +671,6 @@ def reservetournamentday(request):
         session_key = f"tournament_session:{session_id}"
         session_slots_key = f"tournament_session_slots:{session_id}"
         ground_date_key = f"ground_slots:{ground_id}:{date_str}"
-        day_lock_key = f"tournament_day_lock:{ground_id}:{date_str}"
         ttl = redis_client.ttl(session_key)
         if ttl is None or ttl <= 0:
             redis_client.set(
@@ -687,36 +686,33 @@ def reservetournamentday(request):
             remaining_seconds = ttl
         redis_client.expire(session_slots_key, remaining_seconds)
         redis_client.expire(ground_date_key, remaining_seconds)  # ADD
-        slot_ids = list(
-            slots.objects.filter(
-                ground=ground,
-                date=date_obj,
-                shift__in=SHIFT_MAP[session_type],
-                is_booked=False,
-                is_blocked=False,
-            ).values_list("id", flat=True)
-        )
-        if not slot_ids:
-            return JsonResponse({
-                "success": False,
-                "message": "No available slots found for this session type"
-            })
+        def get_shift_owner(shift):
+            val = redis_client.get(f"lock:shift:{ground_id}:{date_str}:{shift}")
+            if not val:
+                return None
+            return val.decode() if isinstance(val, bytes) else str(val)
         already_selected = all(
-            redis_client.sismember(session_slots_key, sid)
-            for sid in slot_ids
+            get_shift_owner(shift) == session_id
+            for shift in shifts_to_lock
         )
         if already_selected:
-            for sid in slot_ids:
-                lock_key = f"lock:slot:{ground_id}:{sid}:{date_str}"
-                redis_client.delete(lock_key)
-                redis_client.srem(session_slots_key, sid)
-                redis_client.srem(ground_date_key, sid)  # ADD
-            redis_client.delete(day_lock_key)
+            for shift in shifts_to_lock:
+                redis_client.delete(f"lock:shift:{ground_id}:{date_str}:{shift}")
+                slot_ids = list(
+                    slots.objects.filter(
+                        ground=ground,
+                        date=date_obj,
+                        shift=shift
+                    ).values_list("id", flat=True)
+                )
+                for sid in slot_ids:
+                    redis_client.delete(f"lock:slot:{ground_id}:{sid}:{date_str}")
+                    redis_client.srem(session_slots_key, str(sid))
+                    redis_client.srem(ground_date_key, str(sid))
             reservetournament.objects.filter(
                 session=session,
                 ground=ground,
                 date=date_obj,
-                status="reserved"
             ).delete()
             return JsonResponse({
                 "success": True,
@@ -724,16 +720,29 @@ def reservetournamentday(request):
                 "session_id": session_id,
                 "remaining_seconds": remaining_seconds,
             })
-        owner = redis_client.get(day_lock_key)
-        if owner:
-            owner = owner.decode() if isinstance(owner, bytes) else str(owner)
-            if owner != session_id:
+        for shift in shifts_to_lock:
+            owner = get_shift_owner(shift)
+            if owner and owner != session_id:
                 return JsonResponse({
                     "success": False,
-                    "message": "Day already reserved"
+                    "message": f"{shift} shift on {date_str} is already reserved"
                 })
-        acquired_locks = []
-        for sid in slot_ids:
+        all_slot_ids = list(
+            slots.objects.filter(
+                ground=ground,
+                date=date_obj,
+                shift__in=shifts_to_lock,
+                is_booked=False,
+                is_blocked=False,
+            ).values_list("id", flat=True)
+        )
+        if not all_slot_ids:
+            return JsonResponse({
+                "success": False,
+                "message": "No available slots found for this session type"
+            })
+        acquired_slot_locks = []
+        for sid in all_slot_ids:
             lock_key = f"lock:slot:{ground_id}:{sid}:{date_str}"
             acquired = redis_client.set(
                 lock_key,
@@ -742,21 +751,23 @@ def reservetournamentday(request):
                 ex=remaining_seconds
             )
             if not acquired:
-                for lk in acquired_locks:
+                for lk in acquired_slot_locks:
                     redis_client.delete(lk)
                 return JsonResponse({
                     "success": False,
                     "message": "One or more slots already reserved"
                 })
-
-            acquired_locks.append(lock_key)
-        redis_client.sadd(session_slots_key, *slot_ids)
-        redis_client.sadd(ground_date_key, *slot_ids)  # ADD
-        redis_client.set(
-            day_lock_key,
-            session_id,
-            ex=remaining_seconds
-        )
+            acquired_slot_locks.append(lock_key)
+        for shift in shifts_to_lock:
+            redis_client.set(
+                f"lock:shift:{ground_id}:{date_str}:{shift}",
+                session_id,
+                ex=remaining_seconds
+            )
+        redis_client.sadd(session_slots_key, *[str(sid) for sid in all_slot_ids])
+        redis_client.sadd(ground_date_key, *[str(sid) for sid in all_slot_ids])
+        redis_client.expire(session_slots_key, remaining_seconds)
+        redis_client.expire(ground_date_key, remaining_seconds)
         rt, _ = reservetournament.objects.get_or_create(
             session=session,
             ground=ground,
@@ -769,7 +780,7 @@ def reservetournamentday(request):
         rt.status = "reserved"
         rt.session_type = session_type
         rt.save(update_fields=["status", "session_type"])
-        rt.blocked_slots.set(slot_ids)
+        rt.blocked_slots.set(all_slot_ids)
         if not session.start_date or date_obj < session.start_date:
             session.start_date = date_obj
         if not session.end_date or date_obj > session.end_date:
@@ -795,10 +806,7 @@ def gettournamentreserveddays(request):
     if not ground_id:
         return JsonResponse({"success": False, "message": "Missing ground_id"})
     today = date.today()
-    end_date = today + timedelta(days=29)
-    user_reserved = set()
-    others_reserved = set()
-    booked = set()
+    SHIFTS = ["morning", "afternoon", "evening", "night"]
     user = request.user if request.user.is_authenticated else None
     user_session_id = None
     if user:
@@ -808,47 +816,35 @@ def gettournamentreserveddays(request):
         ).only("id").first()
         if session:
             user_session_id = str(session.id)
-    booked_days = (
-        slots.objects.filter(
-            ground_id=ground_id,
-            date__range=(today, end_date),
-            is_booked=True
-        )
-        .values_list("date", flat=True)
-        .distinct()
-    )
-    for d in booked_days:
-        booked.add(str(d))
-    db_blocked_days = (
-        slots.objects.filter(
-            ground_id=ground_id,
-            date__range=(today, end_date),
-            is_blocked=True,
-            is_booked=False,
-        )
-        .values_list("date", flat=True)
-        .distinct()
-    )
-    for d in db_blocked_days:
-        others_reserved.add(str(d))
+    user_reserved = {}  
+    others_reserved = {}  
+    booked = {}         
     for i in range(30):
         d = today + timedelta(days=i)
         date_str = str(d)
-        day_lock_key = f"tournament_day_lock:{ground_id}:{date_str}"
-        session_id = redis_client.get(day_lock_key)
-        if not session_id:
-            continue
-        session_id = session_id.decode() if isinstance(session_id, bytes) else str(session_id)
-        if user_session_id and session_id == user_session_id:
-            user_reserved.add(date_str)
-            others_reserved.discard(date_str)
-        else:
-            others_reserved.add(date_str)
+        for shift in SHIFTS:
+            shift_lock_key = f"lock:shift:{ground_id}:{date_str}:{shift}"
+            owner = redis_client.get(shift_lock_key)
+            if owner:
+                owner = owner.decode() if isinstance(owner, bytes) else str(owner)
+                if user_session_id and owner == user_session_id:
+                    user_reserved.setdefault(date_str, []).append(shift)
+                else:
+                    others_reserved.setdefault(date_str, []).append(shift)
+                continue
+            is_booked = slots.objects.filter(
+                ground_id=ground_id,
+                date=d,
+                shift=shift,
+                is_booked=True
+            ).exists()
+            if is_booked:
+                booked.setdefault(date_str, []).append(shift)
     return JsonResponse({
         "success": True,
-        "user_reserved": list(user_reserved),
-        "others_reserved": list(others_reserved),
-        "booked": list(booked),
+        "user_reserved": user_reserved,
+        "others_reserved": others_reserved,
+        "booked": booked,
         "session_id": user_session_id,
     })
 
@@ -962,6 +958,8 @@ def reserveslot(request):
             })
         redis_client.sadd(session_slots_key, slotid)
         redis_client.sadd(ground_date_key, slotid)
+        redis_client.expire(session_slots_key, remaining_seconds)
+        redis_client.expire(ground_date_key, remaining_seconds)
         return JsonResponse({
             "success": True,
             "action": "selected",
@@ -1117,6 +1115,10 @@ def tournamentcheckout(request, session_id):
         id=session_id,
         user=request.user,
     )
+    session_key = f"tournament_session:{session_id}"
+    if not redis_client.exists(session_key):
+        cancel_tournament_booking_session(t_session)
+        return redirect("grounds_page")
     reserved_days = (
         reservetournament.objects
         .filter(session=t_session, status="reserved")
@@ -3345,12 +3347,6 @@ def booktournament(user, ground, plan):
             )
             date_str = str(date)
             session_id = str(session.id)
-            day_lock_key = f"tournament_day_lock:{ground.id}:{date_str}"
-            redis_client.set(
-                day_lock_key,
-                session_id,
-                ex=TOURNAMENT_SESSION_TTL_SECONDS
-            )
             slot_id_list = list(locked_slots.values_list("id", flat=True))
             ground_date_key = f"ground_slots:{ground.id}:{date_str}"
             redis_client.sadd(ground_date_key, *slot_id_list)
@@ -3358,6 +3354,12 @@ def booktournament(user, ground, plan):
             for sid in slot_id_list:
                 lock_key = f"lock:slot:{ground.id}:{sid}:{date_str}"
                 redis_client.set(lock_key, session_id, nx=True, ex=TOURNAMENT_SESSION_TTL_SECONDS)
+            for s in shifts_to_filter:
+                redis_client.set(
+                    f"lock:shift:{ground.id}:{date_str}:{s}",
+                    session_id,
+                    ex=TOURNAMENT_SESSION_TTL_SECONDS
+                )
         redis_client.set(
             f"tournament_session:{session.id}",
             json.dumps({
