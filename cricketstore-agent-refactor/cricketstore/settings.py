@@ -17,7 +17,7 @@ from celery.schedules import crontab
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+RAZORPAY_SECRET_KEY = os.getenv("RAZORPAY_SECRET_KEY")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
@@ -47,7 +47,6 @@ INSTALLED_APPS = [
     'django_celery_beat',
 ]
 
-ALLOWED_HOSTS = ["*"]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -87,40 +86,41 @@ WSGI_APPLICATION = 'cricketstore.wsgi.application'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            'NAME': os.environ.get('DB_NAME', 'cricketstore'),
-            'USER': os.environ.get('DB_USER', 'postgres'),
-            'PASSWORD': os.environ.get('DB_PASS', 'postgres'),
-            'HOST': os.environ.get('DB_HOST', 'localhost'),
-             'PORT': os.environ.get('DB_PORT', '5432'),
-        }
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("DB_NAME", "cricketstore"),
+        "USER": os.environ.get("DB_USER", "postgres"),
+        "PASSWORD": os.environ.get("DB_PASS", "postgres"),
+        "HOST": os.environ.get("DB_HOST", "localhost"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+        "OPTIONS": {
+            "sslmode": "require",  
+        },
     }
+}
+
 
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-REDIS_CACHE_URL = os.environ.get('REDIS_CACHE_URL', 'redis://localhost:6379/1')
-REDIS_LOCK_DB = int(os.environ.get('REDIS_LOCK_DB', '0'))
-REDIS_CACHE_DB = int(os.environ.get('REDIS_CACHE_DB', '1'))
+REDIS_CACHE_URL = os.environ.get('REDIS_CACHE_URL', REDIS_URL)
+
 redis_client = redis.from_url(
     REDIS_URL,
-    db=REDIS_LOCK_DB,
-    decode_responses=False
+    decode_responses=False,
+    ssl_cert_reqs=None      
 )
 
-if not DEBUG:
-    DEFAULT_FILE_STORAGE    = 'storages.backends.s3boto3.S3Boto3Storage'
-    STATICFILES_STORAGE     = 'storages.backends.s3boto3.S3StaticStorage'
-    AWS_STORAGE_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME')
-    AWS_S3_REGION_NAME      = 'eu-north-1'
-
-CACHES={
-    "default":{
+CACHES = {
+    "default": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_CACHE_URL,
-        "OPTIONS":{
+        "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "KEY_PREFIX": "cache",
+            "CONNECTION_POOL_KWARGS": {
+                "ssl_cert_reqs": None    
+            },
         },
-        "TIMEOUT":3600
+        "TIMEOUT": 3600
     }
 }
 # Password validation
@@ -161,10 +161,26 @@ STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
+AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'ap-south-1')
 
-# DEBUG is configured earlier from environment.
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = False
+
+AWS_S3_CUSTOM_DOMAIN  = f'{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com'
+MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/'
+STORAGES = {
+    'default': {
+        'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 ELASTICSEARCH_DSL = {
         "default": {
@@ -191,9 +207,10 @@ KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
     "localhost:9092"
 ).split(",")
 KAFKA_BOOKING_TOPIC      = "booking-events"
-KAFKA_RETRY_TOPIC        = "booking-retry"
-KAFKA_DLQ_TOPIC          = "booking-dlq"
 KAFKA_NOTIFICATION_TOPIC = "booking-notifications"
+
+KAFKA_SASL_USERNAME = os.environ.get("KAFKA_SASL_USERNAME", "")
+KAFKA_SASL_PASSWORD = os.environ.get("KAFKA_SASL_PASSWORD", "")
 
 FRONTEND_BASE_URL = os.getenv(
     "FRONTEND_BASE_URL",

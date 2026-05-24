@@ -10,11 +10,32 @@
         <h2>Signup</h2>
         <form method="POST" id="signup-form">
             {% csrf_token %}
-            {{ form.as_p }}
+            {% if form.errors %}
+                <div class="form-errors">
+                    Please fix the errors below and try again.
+                </div>
+            {% endif %}
+
+            {% for field in form %}
+                <p>
+                    {{ field.label_tag }}
+                    {{ field }}
+                    {% if field.help_text %}
+                        <span class="help-text">{{ field.help_text }}</span>
+                    {% endif %}
+                    {% for error in field.errors %}
+                        <span class="error">{{ error }}</span>
+                    {% endfor %}
+                </p>
+            {% endfor %}
+
+            {% for error in form.non_field_errors %}
+                <p class="error">{{ error }}</p>
+            {% endfor %}
+
             <button type="submit" class="btn btn-primary">Signup</button>
         </form>
         <p class="mt-2">Already have an account? <a href="{% url 'login' %}">Login here</a></p>
     </div>
-    <script type="text/javascript" src="{% static 'store/js/signup.js' %}"></script>
 </body>
 </html>

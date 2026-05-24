@@ -484,9 +484,12 @@ def selectcity(request):
 
 def grounddetail(request, pk):
     date_str = request.session.pop('selected_date', None)
+
     if request.GET.get('date'):
-      date_str = request.GET.get('date')
+        date_str = request.GET.get('date')
+
     ground = get_object_or_404(Ground, id=pk)
+
     if date_str:
         try:
             date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -494,6 +497,7 @@ def grounddetail(request, pk):
             date_obj = timezone.now().date()
     else:
         date_obj = timezone.now().date()
+
     date_for_input = date_obj.strftime('%Y-%m-%d')
     today = timezone.now().date().strftime('%Y-%m-%d')
     cities = Ground.objects.values_list('city', flat=True).distinct()
@@ -504,27 +508,68 @@ def grounddetail(request, pk):
         slot_ids = [int(s) for s in selectedslots.split(',') if s]
         selected_slot_objs = slots.objects.filter(id__in=slot_ids)
         total = sum(slot.price for slot in selected_slot_objs)
+
         context = {
             'ground': ground,
             'slots_list': slots_list,
             'total': total
         }
         return render(request, 'bookings/checkoutpage.html', context)
-    time_slots = slots.objects.filter(ground=ground, date=date_obj).order_by('starttime')
+
+    time_slots = slots.objects.filter(
+        ground=ground,
+        date=date_obj
+    ).order_by('starttime')
+
+    now = timezone.localtime()
+    today_date = now.date()
+    current_time = now.time()
+
     booked = time_slots.filter(is_booked=True)
-    reserved = time_slots.filter(is_blocked=True)
-    available = time_slots.filter(is_blocked=False, is_booked=False)
+
+    if date_obj < today_date:
+        passed_slots = time_slots
+    elif date_obj == today_date:
+        passed_slots = time_slots.filter(endtime__lte=current_time)
+    else:
+        passed_slots = slots.objects.none()
+
+    booked = booked | passed_slots
+
+    booked_ids = booked.values_list("id", flat=True)
+
+    reserved = time_slots.filter(
+        is_blocked=True
+    ).exclude(id__in=booked_ids)
+
+    available = time_slots.filter(
+        is_blocked=False,
+        is_booked=False
+    ).exclude(id__in=booked_ids)
+
     userreservedslots = []
+
     if request.user.is_authenticated:
         usersession = reservationsession.objects.filter(
-            user=request.user, ground=ground, date=date_obj
-        ).first()
+        user=request.user,
+        ground=ground,
+        date=date_obj,
+          ).order_by('-created_at').first()
         if usersession:
-            userreservedslots = [rs.slot.id for rs in reservedslots.objects.filter(session=usersession, status='reserved')]
+            session_key = f"session:{usersession.id}"
+            if redis_client.exists(session_key):
+                session_slots_key = f"session_slots:{usersession.id}"
+                redis_slot_ids = redis_client.smembers(session_slots_key)
+                userreservedslots = [
+                   int(sid.decode() if isinstance(sid, bytes) else sid)
+                   for sid in redis_slot_ids
+                ]
+            else:
+                userreservedslots = []
     context = {
         'ground': ground,
-        'date': date_for_input,   
-        'today': today,           
+        'date': date_for_input,
+        'today': today,
         'cities': cities,
         'selected_city': ground.city,
         'reserved': reserved,
@@ -533,7 +578,9 @@ def grounddetail(request, pk):
         'all_slots': time_slots,
         'userreservedslots': userreservedslots,
     }
+
     return render(request, 'bookings/groundpage.html', context)
+
 
 
 def decode_redis_ids(raw_ids):
@@ -579,39 +626,64 @@ def cancel_tournament_booking_session(t_session):
 def tournamentBookingPage(request, pk):
     today = date.today()
     ground = get_object_or_404(Ground, id=pk)
+    SHIFTS = ["morning", "afternoon", "evening", "night"]
     user = request.user if request.user.is_authenticated else None
+    user_session_id = None
+
+    if user:
+        # Get newest session
+        latest_session = tournamentsession.objects.filter(
+            user=user,
+            ground=ground,
+        ).order_by('-created_at').first()
+
+        if latest_session:
+            session_key = f"tournament_session:{latest_session.id}"
+            if redis_client.exists(session_key):
+                # Alive in Redis — valid
+                user_session_id = str(latest_session.id)
+            # else — expired — user_session_id stays None
+
     dates = []
-    userreserved = set()
-    othersreserved = set()
-    booked = set()
+    user_reserved = {}
+    others_reserved = {}
+    booked = {}
+
     for i in range(30):
         d = today + timedelta(days=i)
+        date_str = str(d)
         dates.append({
             "date": d,
             "day_num": d.day
         })
-        day_slots = slots.objects.filter(ground=ground, date=d)
-        if day_slots.filter(is_booked=True).exists():
-            booked.add(d)
-            continue
-        blocked = day_slots.filter(is_blocked=True)
-        if blocked.exists():
-            session_users = blocked.values_list(
-              "tournament_days__session__user_id", flat=True
-            ).distinct()
-            if user and user.id in session_users:
-                userreserved.add(d)
-            else:
-                othersreserved.add(d)
+        for shift in SHIFTS:
+            shift_lock_key = f"lock:shift:{ground.id}:{date_str}:{shift}"
+            owner = redis_client.get(shift_lock_key)
+            if owner:
+                owner = owner.decode() if isinstance(owner, bytes) else str(owner)
+                if user_session_id and owner == user_session_id:
+                    user_reserved.setdefault(date_str, []).append(shift)
+                else:
+                    others_reserved.setdefault(date_str, []).append(shift)
+                continue
+            is_booked = slots.objects.filter(
+                ground=ground,
+                date=d,
+                shift=shift,
+                is_booked=True
+            ).exists()
+            if is_booked:
+                booked.setdefault(date_str, []).append(shift)
+
     context = {
         "ground": ground,
         "dates": dates,
+        "shifts": SHIFTS,
+        "user_reserved": user_reserved,
+        "others_reserved": others_reserved,
         "booked": booked,
-        "userreserveddates": userreserved,
-        "reserved": othersreserved,
     }
     return render(request, "bookings/tournament.html", context)
-
 TOURNAMENT_SESSION_TTL_SECONDS = 15 * 60
 
 
@@ -645,9 +717,9 @@ def reservetournamentday(request):
         if session_type not in SHIFT_MAP:
             return JsonResponse({"success": False, "message": "Invalid session type"})
         session = tournamentsession.objects.filter(
-            user=user,
-            ground=ground,
-        ).first()
+           user=user,
+           ground=ground,
+           ).order_by('-created_at').first()
         if session:
             existing_session_key = f"tournament_session:{session.id}"
             if not redis_client.exists(existing_session_key):
@@ -805,20 +877,30 @@ def gettournamentreserveddays(request):
     ground_id = request.GET.get("ground_id")
     if not ground_id:
         return JsonResponse({"success": False, "message": "Missing ground_id"})
+
     today = date.today()
     SHIFTS = ["morning", "afternoon", "evening", "night"]
     user = request.user if request.user.is_authenticated else None
     user_session_id = None
+
     if user:
-        session = tournamentsession.objects.filter(
+        # Get newest session
+        latest_session = tournamentsession.objects.filter(
             user=user,
             ground_id=ground_id,
-        ).only("id").first()
-        if session:
-            user_session_id = str(session.id)
-    user_reserved = {}  
-    others_reserved = {}  
-    booked = {}         
+        ).order_by('-created_at').first()
+
+        if latest_session:
+            session_key = f"tournament_session:{latest_session.id}"
+            if redis_client.exists(session_key):
+                # Alive in Redis — valid session
+                user_session_id = str(latest_session.id)
+            # else — expired — user_session_id stays None
+
+    user_reserved = {}
+    others_reserved = {}
+    booked = {}
+
     for i in range(30):
         d = today + timedelta(days=i)
         date_str = str(d)
@@ -840,6 +922,7 @@ def gettournamentreserveddays(request):
             ).exists()
             if is_booked:
                 booked.setdefault(date_str, []).append(shift)
+
     return JsonResponse({
         "success": True,
         "user_reserved": user_reserved,
@@ -848,10 +931,9 @@ def gettournamentreserveddays(request):
         "session_id": user_session_id,
     })
 
-
 MAX_SLOTS_PER_SESSION = 6
 
-SESSION_TTL_SECONDS = 15 * 60
+SESSION_TTL_SECONDS = 10 * 60
 MAX_SLOTS_PER_SESSION = 6
 
 
@@ -909,6 +991,7 @@ def reserveslot(request):
                 date=date_obj,
             )
         session_id = str(session.id)
+        print(f"Session ID: {session_id}")
         session_key = f"session:{session_id}"
         session_slots_key = f"session_slots:{session_id}"
         ground_date_key = f"ground_slots:{groundid}:{date_str}"
@@ -933,6 +1016,7 @@ def reserveslot(request):
             redis_client.srem(session_slots_key, slotid)
             redis_client.srem(ground_date_key, slotid)
             redis_client.delete(lock_key)
+            print(f"Slot unselected: {slotid}")
             return JsonResponse({
                 "success": True,
                 "action": "unselected",
@@ -951,12 +1035,14 @@ def reserveslot(request):
             nx=True,
             ex=remaining_seconds
         )
+        print(f"Attempting to acquire lock for slot {slotid} with key {lock_key}: {'Success' if acquired else 'Failed'}")
         if not acquired:
             return JsonResponse({
                 "success": False,
                 "message": "Slot already reserved"
             })
         redis_client.sadd(session_slots_key, slotid)
+        print(f"Slot {slotid} reserved in session {session_id}")
         redis_client.sadd(ground_date_key, slotid)
         redis_client.expire(session_slots_key, remaining_seconds)
         redis_client.expire(ground_date_key, remaining_seconds)
@@ -977,67 +1063,68 @@ def reserveslot(request):
 from django.http import JsonResponse
 from django.utils import timezone
 
+from django.utils import timezone
+from datetime import datetime
+
 def getreservedslots(request):
     groundid = request.GET.get("ground_id")
     date_str = request.GET.get("date")
-
     if not (groundid and date_str):
         return JsonResponse({"success": False, "message": "Missing parameters"})
+    try:
+        selected_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return JsonResponse({"success": False, "message": "Invalid date"})
 
-    booked_slots = list(
-        slots.objects.filter(
-            ground_id=groundid,
-            date=date_str,
-            is_booked=True
-        ).values_list("id", flat=True)
+    now = timezone.localtime()
+    today = now.date()
+    current_time = now.time()
+
+    slot_qs = slots.objects.filter(
+        ground_id=groundid,
+        date=selected_date,
     )
 
-    db_blocked_slots = list(
-        slots.objects.filter(
-            ground_id=groundid,
-            date=date_str,
-            is_blocked=True,
-            is_booked=False
-        ).values_list("id", flat=True)
+    booked_slots = set(
+        slot_qs.filter(is_booked=True).values_list("id", flat=True)
     )
 
-    ground_date_key = f"ground_slots:{groundid}:{date_str}"
-    redis_slot_ids = redis_client.smembers(ground_date_key)
+    if selected_date < today:
+        passed_slot_ids = set(slot_qs.values_list("id", flat=True))
+    elif selected_date == today:
+        passed_slot_ids = set(
+            slot_qs.filter(endtime__lte=current_time).values_list("id", flat=True)
+        )
+    else:
+        passed_slot_ids = set()
 
+    booked_slots.update(passed_slot_ids)
+    slot_ids = slot_qs.values_list("id", flat=True)
     user_reserved = []
     others_reserved = []
     user_session_id = None
-
     if request.user.is_authenticated:
-        session = reservationsession.objects.filter(
-            user=request.user,
-            ground_id=groundid,
-            date=date_str,
-        ).only("id").first()
-
-        if session:
-            user_session_id = str(session.id)
-
-    for slot_id in redis_slot_ids:
-        slot_id = slot_id.decode() if isinstance(slot_id, bytes) else str(slot_id)
-
+        latest_session = reservationsession.objects.filter(
+        user=request.user,
+        ground_id=groundid,
+        date=selected_date,
+    ).order_by('-created_at').first()
+    if latest_session:
+        session_key = f"session:{latest_session.id}"
+        if redis_client.exists(session_key):
+            user_session_id = str(latest_session.id)
+    for slot_id in slot_ids:
+        slot_id = str(slot_id)
+        if int(slot_id) in booked_slots:
+            continue
         lock_key = f"lock:slot:{groundid}:{slot_id}:{date_str}"
         session_id = redis_client.get(lock_key)
-
         if not session_id:
             continue
-
         session_id = session_id.decode() if isinstance(session_id, bytes) else str(session_id)
-
         if user_session_id and session_id == user_session_id:
             user_reserved.append(slot_id)
         else:
-            others_reserved.append(slot_id)
-
-    for slot_id in db_blocked_slots:
-        slot_id = str(slot_id)
-
-        if slot_id not in user_reserved:
             others_reserved.append(slot_id)
 
     return JsonResponse({
@@ -1049,7 +1136,7 @@ def getreservedslots(request):
 
 
 
-client=razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+client=razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_SECRET_KEY))
 
 
 def lock_tournament_order_slots_for_payment(t_session):

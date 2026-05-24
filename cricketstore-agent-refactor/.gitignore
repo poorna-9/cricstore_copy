@@ -1,3 +1,4 @@
+# Environment
 .env
 myenv/
 __pycache__/
@@ -7,3 +8,10 @@ __pycache__/
 .vscode/
 .idea/
 *.sqlite3
+nginx/
+media/
+staticfiles/
+.git/
+.gitignore
+README.md
+docker-compose.override.yml

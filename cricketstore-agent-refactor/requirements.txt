@@ -19,8 +19,9 @@ redis
 django-redis
 boto3
 django-storages[s3]
-stripe 
+stripe
 kafka-python
 python-dotenv
 django-celery-beat
 celery
+kafka-python-ng

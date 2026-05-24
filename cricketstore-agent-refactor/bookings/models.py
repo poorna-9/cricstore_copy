@@ -114,6 +114,8 @@ class tournamentsession(models.Model):
     ],
     default="full_day"   
      )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
 class reservetournament(models.Model):
     session = models.ForeignKey(tournamentsession, on_delete=models.CASCADE)
     ground = models.ForeignKey(Ground, on_delete=models.CASCADE)
