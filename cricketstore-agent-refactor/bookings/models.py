@@ -94,6 +94,8 @@ class slots(models.Model):
     is_blocked=models.BooleanField(default=False)
     price=models.IntegerField(null=True,blank=True)
     blocked_at = models.DateTimeField(null=True, blank=True) 
+    class Meta:
+        unique_together = ('ground', 'date', 'starttime', 'endtime')
     def __str__(self):
         return f"{self.ground.name} {self.date} {self.starttime.strftime('%I:%M %p')} - {self.endtime.strftime('%I:%M %p')}"
     

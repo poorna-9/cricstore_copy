@@ -1,0 +1,525 @@
+ Image cricketstore-agent-refactor-web Building 
+ Image cricketstore-agent-refactor-celery-worker Building 
+ Image cricketstore-agent-refactor-celery-beat Building 
+ Image cricketstore-agent-refactor-kafka-consumer Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 2.21kB done
+#1 DONE 0.0s
+
+#2 [celery-worker internal] load build definition from Dockerfile
+#2 transferring dockerfile: 416B done
+#2 DONE 0.0s
+
+#3 [web internal] load metadata for docker.io/library/python:3.12-slim
+#3 DONE 0.1s
+
+#4 [web internal] load .dockerignore
+#4 transferring context: 144B done
+#4 DONE 0.0s
+
+#5 [celery-worker 1/7] FROM docker.io/library/python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
+#5 resolve docker.io/library/python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203 0.0s done
+#5 DONE 0.0s
+
+#6 [celery-worker internal] load build context
+#6 transferring context: 7.62kB 0.0s done
+#6 DONE 0.0s
+
+#7 [celery-beat 2/7] WORKDIR /app
+#7 CACHED
+
+#8 [celery-beat 3/7] RUN apt-get update && apt-get install -y build-essential libpq-dev && apt-get clean
+#8 CACHED
+
+#9 [celery-beat 4/7] COPY requirements.txt /app/
+#9 CACHED
+
+#10 [celery-beat 5/7] RUN pip install --upgrade pip
+#10 CACHED
+
+#11 [celery-beat 6/7] RUN pip install -r requirements.txt
+#11 0.907 Collecting Django<6.0,>=5.1 (from -r requirements.txt (line 1))
+#11 0.931   Downloading django-5.2.14-py3-none-any.whl.metadata (4.1 kB)
+#11 0.955 Collecting gunicorn (from -r requirements.txt (line 2))
+#11 0.958   Downloading gunicorn-26.0.0-py3-none-any.whl.metadata (5.4 kB)
+#11 1.017 Collecting psycopg2-binary (from -r requirements.txt (line 3))
+#11 1.020   Downloading psycopg2_binary-2.9.12-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+#11 1.041 Collecting whitenoise (from -r requirements.txt (line 4))
+#11 1.045   Downloading whitenoise-6.12.0-py3-none-any.whl.metadata (3.7 kB)
+#11 1.200 Collecting pillow (from -r requirements.txt (line 5))
+#11 1.203   Downloading pillow-12.2.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (8.8 kB)
+#11 1.222 Collecting razorpay (from -r requirements.txt (line 6))
+#11 1.226   Downloading razorpay-2.0.1-py3-none-any.whl.metadata (3.9 kB)
+#11 1.245 Collecting django-elasticsearch-dsl (from -r requirements.txt (line 7))
+#11 1.249   Downloading django_elasticsearch_dsl-9.0-py2.py3-none-any.whl.metadata (7.7 kB)
+#11 1.282 Collecting elasticsearch<9.0.0,>=8.0.0 (from -r requirements.txt (line 8))
+#11 1.290   Downloading elasticsearch-8.19.3-py3-none-any.whl.metadata (9.1 kB)
+#11 1.344 Collecting langchain>=0.3.0 (from -r requirements.txt (line 10))
+#11 1.347   Downloading langchain-1.3.2-py3-none-any.whl.metadata (5.8 kB)
+#11 1.388 Collecting langchain-core>=0.3.0 (from -r requirements.txt (line 11))
+#11 1.391   Downloading langchain_core-1.4.0-py3-none-any.whl.metadata (4.5 kB)
+#11 1.416 Collecting langchain-community>=0.3.0 (from -r requirements.txt (line 12))
+#11 1.420   Downloading langchain_community-0.4.2-py3-none-any.whl.metadata (3.4 kB)
+#11 1.438 Collecting langchain-huggingface>=0.1.0 (from -r requirements.txt (line 13))
+#11 1.442   Downloading langchain_huggingface-1.2.2-py3-none-any.whl.metadata (4.0 kB)
+#11 1.480 Collecting huggingface_hub>=0.24.0 (from -r requirements.txt (line 15))
+#11 1.483   Downloading huggingface_hub-1.16.4-py3-none-any.whl.metadata (14 kB)
+#11 1.519 Collecting langchain-openai (from -r requirements.txt (line 16))
+#11 1.522   Downloading langchain_openai-1.2.2-py3-none-any.whl.metadata (3.1 kB)
+#11 1.570 Collecting openai (from -r requirements.txt (line 17))
+#11 1.573   Downloading openai-2.38.0-py3-none-any.whl.metadata (31 kB)
+#11 1.605 Collecting redis (from -r requirements.txt (line 18))
+#11 1.609   Downloading redis-7.4.0-py3-none-any.whl.metadata (12 kB)
+#11 1.632 Collecting django-redis (from -r requirements.txt (line 19))
+#11 1.636   Downloading django_redis-6.0.0-py3-none-any.whl.metadata (32 kB)
+#11 1.876 Collecting boto3 (from -r requirements.txt (line 20))
+#11 1.880   Downloading boto3-1.43.15-py3-none-any.whl.metadata (6.6 kB)
+#11 1.940 Collecting stripe (from -r requirements.txt (line 22))
+#11 1.943   Downloading stripe-15.1.0-py3-none-any.whl.metadata (18 kB)
+#11 1.967 Collecting kafka-python (from -r requirements.txt (line 23))
+#11 1.970   Downloading kafka_python-2.3.1-py2.py3-none-any.whl.metadata (9.5 kB)
+#11 1.992 Collecting python-dotenv (from -r requirements.txt (line 24))
+#11 1.995   Downloading python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+#11 2.014 Collecting django-celery-beat (from -r requirements.txt (line 25))
+#11 2.020   Downloading django_celery_beat-2.9.0-py3-none-any.whl.metadata (13 kB)
+#11 2.050 Collecting celery (from -r requirements.txt (line 26))
+#11 2.054   Downloading celery-5.6.3-py3-none-any.whl.metadata (23 kB)
+#11 2.080 Collecting kafka-python-ng (from -r requirements.txt (line 27))
+#11 2.085   Downloading kafka_python_ng-2.2.3-py2.py3-none-any.whl.metadata (9.7 kB)
+#11 2.104 Collecting django-storages[s3] (from -r requirements.txt (line 21))
+#11 2.109   Downloading django_storages-1.14.6-py3-none-any.whl.metadata (4.7 kB)
+#11 2.130 Collecting asgiref>=3.8.1 (from Django<6.0,>=5.1->-r requirements.txt (line 1))
+#11 2.135   Downloading asgiref-3.11.1-py3-none-any.whl.metadata (9.3 kB)
+#11 2.155 Collecting sqlparse>=0.3.1 (from Django<6.0,>=5.1->-r requirements.txt (line 1))
+#11 2.160   Downloading sqlparse-0.5.5-py3-none-any.whl.metadata (4.7 kB)
+#11 2.181 Collecting elastic-transport<9,>=8.15.1 (from elasticsearch<9.0.0,>=8.0.0->-r requirements.txt (line 8))
+#11 2.184   Downloading elastic_transport-8.17.1-py3-none-any.whl.metadata (3.8 kB)
+#11 2.203 Collecting python-dateutil (from elasticsearch<9.0.0,>=8.0.0->-r requirements.txt (line 8))
+#11 2.206   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+#11 2.227 Collecting typing-extensions (from elasticsearch<9.0.0,>=8.0.0->-r requirements.txt (line 8))
+#11 2.230   Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+#11 2.256 Collecting urllib3<3,>=1.26.2 (from elastic-transport<9,>=8.15.1->elasticsearch<9.0.0,>=8.0.0->-r requirements.txt (line 8))
+#11 2.262   Downloading urllib3-2.7.0-py3-none-any.whl.metadata (6.9 kB)
+#11 2.285 Collecting certifi (from elastic-transport<9,>=8.15.1->elasticsearch<9.0.0,>=8.0.0->-r requirements.txt (line 8))
+#11 2.289   Downloading certifi-2026.5.20-py3-none-any.whl.metadata (2.5 kB)
+#11 2.310 Collecting packaging (from gunicorn->-r requirements.txt (line 2))
+#11 2.322   Downloading packaging-26.2-py3-none-any.whl.metadata (3.5 kB)
+#11 2.351 Collecting requests (from razorpay->-r requirements.txt (line 6))
+#11 2.354   Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+#11 2.363 INFO: pip is looking at multiple versions of django-elasticsearch-dsl to determine which version is compatible with other requirements. This could take a while.
+#11 2.364 Collecting django-elasticsearch-dsl (from -r requirements.txt (line 7))
+#11 2.370   Downloading django_elasticsearch_dsl-8.2-py2.py3-none-any.whl.metadata (7.5 kB)
+#11 2.389 Collecting six (from django-elasticsearch-dsl->-r requirements.txt (line 7))
+#11 2.392   Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+#11 2.427 Collecting langgraph<1.3.0,>=1.2.2 (from langchain>=0.3.0->-r requirements.txt (line 10))
+#11 2.431   Downloading langgraph-1.2.2-py3-none-any.whl.metadata (8.0 kB)
+#11 2.516 Collecting pydantic<3.0.0,>=2.7.4 (from langchain>=0.3.0->-r requirements.txt (line 10))
+#11 2.520   Downloading pydantic-2.13.4-py3-none-any.whl.metadata (109 kB)
+#11 2.542 Collecting jsonpatch<2.0.0,>=1.33.0 (from langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 2.545   Downloading jsonpatch-1.33-py2.py3-none-any.whl.metadata (3.0 kB)
+#11 2.561 Collecting langchain-protocol>=0.0.14 (from langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 2.565   Downloading langchain_protocol-0.0.15-py3-none-any.whl.metadata (2.4 kB)
+#11 2.615 Collecting langsmith<1.0.0,>=0.3.45 (from langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 2.619   Downloading langsmith-0.8.5-py3-none-any.whl.metadata (15 kB)
+#11 2.657 Collecting pyyaml<7.0.0,>=5.3.0 (from langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 2.661   Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+#11 2.681 Collecting tenacity!=8.4.0,<10.0.0,>=8.1.0 (from langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 2.685   Downloading tenacity-9.1.4-py3-none-any.whl.metadata (1.2 kB)
+#11 2.752 Collecting uuid-utils<1.0,>=0.12.0 (from langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 2.757   Downloading uuid_utils-0.16.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.4 kB)
+#11 2.775 Collecting jsonpointer>=1.9 (from jsonpatch<2.0.0,>=1.33.0->langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 2.781   Downloading jsonpointer-3.1.1-py3-none-any.whl.metadata (2.4 kB)
+#11 2.801 Collecting langgraph-checkpoint<5.0.0,>=4.1.0 (from langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 2.805   Downloading langgraph_checkpoint-4.1.1-py3-none-any.whl.metadata (5.2 kB)
+#11 2.823 Collecting langgraph-prebuilt<1.2.0,>=1.1.0 (from langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 2.826   Downloading langgraph_prebuilt-1.1.0-py3-none-any.whl.metadata (5.2 kB)
+#11 2.849 Collecting langgraph-sdk<0.4.0,>=0.3.0 (from langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 2.853   Downloading langgraph_sdk-0.3.15-py3-none-any.whl.metadata (1.7 kB)
+#11 2.972 Collecting xxhash>=3.5.0 (from langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 2.976   Downloading xxhash-3.7.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+#11 3.024 Collecting ormsgpack>=1.12.0 (from langgraph-checkpoint<5.0.0,>=4.1.0->langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 3.028   Downloading ormsgpack-1.12.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.2 kB)
+#11 3.052 Collecting httpx>=0.25.2 (from langgraph-sdk<0.4.0,>=0.3.0->langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 3.056   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+#11 3.245 Collecting orjson>=3.11.5 (from langgraph-sdk<0.4.0,>=0.3.0->langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 3.250   Downloading orjson-3.11.9-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (41 kB)
+#11 3.275 Collecting requests-toolbelt>=1.0.0 (from langsmith<1.0.0,>=0.3.45->langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 3.278   Downloading requests_toolbelt-1.0.0-py2.py3-none-any.whl.metadata (14 kB)
+#11 3.338 Collecting zstandard>=0.23.0 (from langsmith<1.0.0,>=0.3.45->langchain-core>=0.3.0->-r requirements.txt (line 11))
+#11 3.346   Downloading zstandard-0.25.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (3.3 kB)
+#11 3.368 Collecting anyio (from httpx>=0.25.2->langgraph-sdk<0.4.0,>=0.3.0->langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 3.372   Downloading anyio-4.13.0-py3-none-any.whl.metadata (4.5 kB)
+#11 3.392 Collecting httpcore==1.* (from httpx>=0.25.2->langgraph-sdk<0.4.0,>=0.3.0->langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 3.395   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+#11 3.414 Collecting idna (from httpx>=0.25.2->langgraph-sdk<0.4.0,>=0.3.0->langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 3.417   Downloading idna-3.16-py3-none-any.whl.metadata (6.4 kB)
+#11 3.434 Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.25.2->langgraph-sdk<0.4.0,>=0.3.0->langgraph<1.3.0,>=1.2.2->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 3.437   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+#11 3.453 Collecting annotated-types>=0.6.0 (from pydantic<3.0.0,>=2.7.4->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 3.456   Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+#11 4.026 Collecting pydantic-core==2.46.4 (from pydantic<3.0.0,>=2.7.4->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 4.029   Downloading pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+#11 4.045 Collecting typing-inspection>=0.4.2 (from pydantic<3.0.0,>=2.7.4->langchain>=0.3.0->-r requirements.txt (line 10))
+#11 4.048   Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+#11 4.486 Collecting aiohttp<4.0.0,>=3.8.3 (from langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.489   Downloading aiohttp-3.13.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+#11 4.505 Collecting httpx-sse<1.0.0,>=0.4.0 (from langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.508   Downloading httpx_sse-0.4.3-py3-none-any.whl.metadata (9.7 kB)
+#11 4.526 Collecting langchain-classic<2.0.0,>=1.0.7 (from langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.530   Downloading langchain_classic-1.0.7-py3-none-any.whl.metadata (5.1 kB)
+#11 4.686 Collecting numpy>=1.26.2 (from langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.689   Downloading numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+#11 4.709 Collecting pydantic-settings<3.0.0,>=2.10.1 (from langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.712   Downloading pydantic_settings-2.14.1-py3-none-any.whl.metadata (3.4 kB)
+#11 4.922 Collecting sqlalchemy<3.0.0,>=1.4.0 (from langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.925   Downloading sqlalchemy-2.0.50-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.5 kB)
+#11 4.948 Collecting aiohappyeyeballs>=2.5.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.951   Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl.metadata (5.9 kB)
+#11 4.965 Collecting aiosignal>=1.4.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.968   Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+#11 4.985 Collecting attrs>=17.3.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 4.988   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+#11 5.116 Collecting frozenlist>=1.1.1 (from aiohttp<4.0.0,>=3.8.3->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 5.122   Downloading frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+#11 5.297 Collecting multidict<7.0,>=4.5 (from aiohttp<4.0.0,>=3.8.3->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 5.300   Downloading multidict-6.7.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+#11 5.350 Collecting propcache>=0.2.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 5.355   Downloading propcache-0.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (16 kB)
+#11 5.547 Collecting yarl<2.0,>=1.17.0 (from aiohttp<4.0.0,>=3.8.3->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 5.551   Downloading yarl-1.24.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (94 kB)
+#11 5.577 Collecting langchain-text-splitters<2.0.0,>=1.1.2 (from langchain-classic<2.0.0,>=1.0.7->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 5.581   Downloading langchain_text_splitters-1.1.2-py3-none-any.whl.metadata (3.3 kB)
+#11 5.674 Collecting charset_normalizer<4,>=2 (from requests->razorpay->-r requirements.txt (line 6))
+#11 5.678   Downloading charset_normalizer-3.4.7-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+#11 5.883 Collecting greenlet>=1 (from sqlalchemy<3.0.0,>=1.4.0->langchain-community>=0.3.0->-r requirements.txt (line 12))
+#11 5.886   Downloading greenlet-3.5.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+#11 6.010 Collecting tokenizers<1.0.0,>=0.19.1 (from langchain-huggingface>=0.1.0->-r requirements.txt (line 13))
+#11 6.013   Downloading tokenizers-0.23.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (9.8 kB)
+#11 6.034 Collecting click>=8.4.0 (from huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.037   Downloading click-8.4.1-py3-none-any.whl.metadata (2.6 kB)
+#11 6.059 Collecting filelock>=3.10.0 (from huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.063   Downloading filelock-3.29.0-py3-none-any.whl.metadata (2.0 kB)
+#11 6.084 Collecting fsspec>=2023.5.0 (from huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.087   Downloading fsspec-2026.4.0-py3-none-any.whl.metadata (10 kB)
+#11 6.129 Collecting hf-xet<2.0.0,>=1.4.3 (from huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.133   Downloading hf_xet-1.5.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+#11 6.164 Collecting tqdm>=4.42.1 (from huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.167   Downloading tqdm-4.67.3-py3-none-any.whl.metadata (57 kB)
+#11 6.192 Collecting typer<0.26.0,>=0.20.0 (from huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.196   Downloading typer-0.25.1-py3-none-any.whl.metadata (15 kB)
+#11 6.223 Collecting shellingham>=1.3.0 (from typer<0.26.0,>=0.20.0->huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.227   Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+#11 6.256 Collecting rich>=13.8.0 (from typer<0.26.0,>=0.20.0->huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.259   Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+#11 6.275 Collecting annotated-doc>=0.0.2 (from typer<0.26.0,>=0.20.0->huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 6.278   Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+#11 6.319 Collecting tiktoken<1.0.0,>=0.7.0 (from langchain-openai->-r requirements.txt (line 16))
+#11 6.323   Downloading tiktoken-0.13.0-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (6.7 kB)
+#11 6.343 Collecting distro<2,>=1.7.0 (from openai->-r requirements.txt (line 17))
+#11 6.347   Downloading distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+#11 6.417 Collecting jiter<1,>=0.10.0 (from openai->-r requirements.txt (line 17))
+#11 6.421   Downloading jiter-0.15.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+#11 6.440 Collecting sniffio (from openai->-r requirements.txt (line 17))
+#11 6.444   Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+#11 6.821 Collecting regex (from tiktoken<1.0.0,>=0.7.0->langchain-openai->-r requirements.txt (line 16))
+#11 6.825   Downloading regex-2026.5.9-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+#11 7.003 Collecting botocore<1.44.0,>=1.43.15 (from boto3->-r requirements.txt (line 20))
+#11 7.007   Downloading botocore-1.43.15-py3-none-any.whl.metadata (5.6 kB)
+#11 7.024 Collecting jmespath<2.0.0,>=0.7.1 (from boto3->-r requirements.txt (line 20))
+#11 7.027   Downloading jmespath-1.1.0-py3-none-any.whl.metadata (7.6 kB)
+#11 7.046 Collecting s3transfer<0.18.0,>=0.17.0 (from boto3->-r requirements.txt (line 20))
+#11 7.050   Downloading s3transfer-0.17.1-py3-none-any.whl.metadata (1.7 kB)
+#11 7.158 Collecting django-timezone-field>=5.0 (from django-celery-beat->-r requirements.txt (line 25))
+#11 7.163   Downloading django_timezone_field-7.2.1-py3-none-any.whl.metadata (13 kB)
+#11 7.183 Collecting tzdata (from django-celery-beat->-r requirements.txt (line 25))
+#11 7.187   Downloading tzdata-2026.2-py2.py3-none-any.whl.metadata (1.4 kB)
+#11 7.204 Collecting python-crontab>=2.3.4 (from django-celery-beat->-r requirements.txt (line 25))
+#11 7.209   Downloading python_crontab-3.3.0-py3-none-any.whl.metadata (17 kB)
+#11 7.227 Collecting cron-descriptor<2.0.0,>=1.2.32 (from django-celery-beat->-r requirements.txt (line 25))
+#11 7.232   Downloading cron_descriptor-1.4.5-py3-none-any.whl.metadata (5.7 kB)
+#11 7.258 Collecting billiard<5.0,>=4.2.1 (from celery->-r requirements.txt (line 26))
+#11 7.264   Downloading billiard-4.2.4-py3-none-any.whl.metadata (4.8 kB)
+#11 7.289 Collecting kombu>=5.6.0 (from celery->-r requirements.txt (line 26))
+#11 7.292   Downloading kombu-5.6.2-py3-none-any.whl.metadata (3.5 kB)
+#11 7.312 Collecting vine<6.0,>=5.1.0 (from celery->-r requirements.txt (line 26))
+#11 7.316   Downloading vine-5.1.0-py3-none-any.whl.metadata (2.7 kB)
+#11 7.332 Collecting click-didyoumean>=0.3.0 (from celery->-r requirements.txt (line 26))
+#11 7.336   Downloading click_didyoumean-0.3.1-py3-none-any.whl.metadata (3.9 kB)
+#11 7.351 Collecting click-repl>=0.2.0 (from celery->-r requirements.txt (line 26))
+#11 7.355   Downloading click_repl-0.3.0-py3-none-any.whl.metadata (3.6 kB)
+#11 7.370 Collecting click-plugins>=1.1.1 (from celery->-r requirements.txt (line 26))
+#11 7.374   Downloading click_plugins-1.1.1.2-py2.py3-none-any.whl.metadata (6.5 kB)
+#11 7.392 Collecting tzlocal (from celery->-r requirements.txt (line 26))
+#11 7.396   Downloading tzlocal-5.3.1-py3-none-any.whl.metadata (7.6 kB)
+#11 7.439 Collecting prompt-toolkit>=3.0.36 (from click-repl>=0.2.0->celery->-r requirements.txt (line 26))
+#11 7.443   Downloading prompt_toolkit-3.0.52-py3-none-any.whl.metadata (6.4 kB)
+#11 7.472 Collecting amqp<6.0.0,>=5.1.1 (from kombu>=5.6.0->celery->-r requirements.txt (line 26))
+#11 7.476   Downloading amqp-5.3.1-py3-none-any.whl.metadata (8.9 kB)
+#11 7.507 Collecting wcwidth (from prompt-toolkit>=3.0.36->click-repl>=0.2.0->celery->-r requirements.txt (line 26))
+#11 7.511   Downloading wcwidth-0.7.0-py3-none-any.whl.metadata (36 kB)
+#11 7.542 Collecting markdown-it-py>=2.2.0 (from rich>=13.8.0->typer<0.26.0,>=0.20.0->huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 7.546   Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+#11 7.574 Collecting pygments<3.0.0,>=2.13.0 (from rich>=13.8.0->typer<0.26.0,>=0.20.0->huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 7.578   Downloading pygments-2.20.0-py3-none-any.whl.metadata (2.5 kB)
+#11 7.601 Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.8.0->typer<0.26.0,>=0.20.0->huggingface_hub>=0.24.0->-r requirements.txt (line 15))
+#11 7.605   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+#11 7.630 Downloading django-5.2.14-py3-none-any.whl (8.3 MB)
+#11 7.672    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.3/8.3 MB 207.5 MB/s  0:00:00
+#11 7.677 Downloading elasticsearch-8.19.3-py3-none-any.whl (952 kB)
+#11 7.688    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 952.8/952.8 kB 83.2 MB/s  0:00:00
+#11 7.692 Downloading elastic_transport-8.17.1-py3-none-any.whl (64 kB)
+#11 7.701 Downloading urllib3-2.7.0-py3-none-any.whl (131 kB)
+#11 7.710 Downloading gunicorn-26.0.0-py3-none-any.whl (212 kB)
+#11 7.720 Downloading psycopg2_binary-2.9.12-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.3 MB)
+#11 7.742    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.3/4.3 MB 208.2 MB/s  0:00:00
+#11 7.745 Downloading whitenoise-6.12.0-py3-none-any.whl (20 kB)
+#11 7.753 Downloading pillow-12.2.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (7.1 MB)
+#11 7.789    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.1/7.1 MB 205.4 MB/s  0:00:00
+#11 7.794 Downloading razorpay-2.0.1-py3-none-any.whl (176 kB)
+#11 7.804 Downloading django_elasticsearch_dsl-8.2-py2.py3-none-any.whl (20 kB)
+#11 7.812 Downloading langchain-1.3.2-py3-none-any.whl (121 kB)
+#11 7.820 Downloading langchain_core-1.4.0-py3-none-any.whl (548 kB)
+#11 7.829    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 548.1/548.1 kB 47.6 MB/s  0:00:00
+#11 7.832 Downloading jsonpatch-1.33-py2.py3-none-any.whl (12 kB)
+#11 7.840 Downloading langgraph-1.2.2-py3-none-any.whl (236 kB)
+#11 7.848 Downloading langgraph_checkpoint-4.1.1-py3-none-any.whl (56 kB)
+#11 7.857 Downloading langgraph_prebuilt-1.1.0-py3-none-any.whl (41 kB)
+#11 7.865 Downloading langgraph_sdk-0.3.15-py3-none-any.whl (98 kB)
+#11 7.872 Downloading langsmith-0.8.5-py3-none-any.whl (399 kB)
+#11 7.881 Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+#11 7.889 Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+#11 7.898 Downloading pydantic-2.13.4-py3-none-any.whl (472 kB)
+#11 7.907 Downloading pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+#11 7.921    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 154.5 MB/s  0:00:00
+#11 7.926 Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+#11 7.935    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 807.9/807.9 kB 79.4 MB/s  0:00:00
+#11 7.938 Downloading tenacity-9.1.4-py3-none-any.whl (28 kB)
+#11 7.946 Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+#11 7.954 Downloading uuid_utils-0.16.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (325 kB)
+#11 7.964 Downloading langchain_community-0.4.2-py3-none-any.whl (2.4 MB)
+#11 7.979    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.4/2.4 MB 165.6 MB/s  0:00:00
+#11 7.983 Downloading aiohttp-3.13.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.8 MB)
+#11 7.999    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 129.3 MB/s  0:00:00
+#11 8.002 Downloading httpx_sse-0.4.3-py3-none-any.whl (9.0 kB)
+#11 8.010 Downloading langchain_classic-1.0.7-py3-none-any.whl (1.0 MB)
+#11 8.021    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 MB 90.9 MB/s  0:00:00
+#11 8.025 Downloading langchain_text_splitters-1.1.2-py3-none-any.whl (35 kB)
+#11 8.033 Downloading multidict-6.7.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (256 kB)
+#11 8.045 Downloading pydantic_settings-2.14.1-py3-none-any.whl (60 kB)
+#11 8.055 Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+#11 8.066 Downloading charset_normalizer-3.4.7-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (216 kB)
+#11 8.078 Downloading idna-3.16-py3-none-any.whl (74 kB)
+#11 8.088 Downloading sqlalchemy-2.0.50-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.4 MB)
+#11 8.108    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.4/3.4 MB 184.1 MB/s  0:00:00
+#11 8.113 Downloading yarl-1.24.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (105 kB)
+#11 8.126 Downloading langchain_huggingface-1.2.2-py3-none-any.whl (31 kB)
+#11 8.137 Downloading huggingface_hub-1.16.4-py3-none-any.whl (668 kB)
+#11 8.150    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 668.2/668.2 kB 38.8 MB/s  0:00:00
+#11 8.154 Downloading hf_xet-1.5.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.5 MB)
+#11 8.178    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 199.3 MB/s  0:00:00
+#11 8.182 Downloading tokenizers-0.23.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+#11 8.201    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 186.4 MB/s  0:00:00
+#11 8.204 Downloading typer-0.25.1-py3-none-any.whl (58 kB)
+#11 8.213 Downloading langchain_openai-1.2.2-py3-none-any.whl (99 kB)
+#11 8.223 Downloading openai-2.38.0-py3-none-any.whl (1.3 MB)
+#11 8.236    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 102.8 MB/s  0:00:00
+#11 8.240 Downloading anyio-4.13.0-py3-none-any.whl (114 kB)
+#11 8.251 Downloading distro-1.9.0-py3-none-any.whl (20 kB)
+#11 8.261 Downloading jiter-0.15.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (346 kB)
+#11 8.274 Downloading tiktoken-0.13.0-cp312-cp312-manylinux_2_28_x86_64.whl (1.1 MB)
+#11 8.289    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 73.9 MB/s  0:00:00
+#11 8.293 Downloading redis-7.4.0-py3-none-any.whl (409 kB)
+#11 8.308 Downloading django_redis-6.0.0-py3-none-any.whl (33 kB)
+#11 8.320 Downloading boto3-1.43.15-py3-none-any.whl (140 kB)
+#11 8.333 Downloading botocore-1.43.15-py3-none-any.whl (15.1 MB)
+#11 8.390    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.1/15.1 MB 274.4 MB/s  0:00:00
+#11 8.394 Downloading jmespath-1.1.0-py3-none-any.whl (20 kB)
+#11 8.402 Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#11 8.411 Downloading s3transfer-0.17.1-py3-none-any.whl (88 kB)
+#11 8.418 Downloading django_storages-1.14.6-py3-none-any.whl (33 kB)
+#11 8.425 Downloading stripe-15.1.0-py3-none-any.whl (2.1 MB)
+#11 8.438    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 185.4 MB/s  0:00:00
+#11 8.442 Downloading kafka_python-2.3.1-py2.py3-none-any.whl (326 kB)
+#11 8.452 Downloading python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+#11 8.460 Downloading django_celery_beat-2.9.0-py3-none-any.whl (105 kB)
+#11 8.468 Downloading celery-5.6.3-py3-none-any.whl (451 kB)
+#11 8.477 Downloading billiard-4.2.4-py3-none-any.whl (87 kB)
+#11 8.485 Downloading click-8.4.1-py3-none-any.whl (116 kB)
+#11 8.494 Downloading cron_descriptor-1.4.5-py3-none-any.whl (50 kB)
+#11 8.502 Downloading vine-5.1.0-py3-none-any.whl (9.6 kB)
+#11 8.509 Downloading kafka_python_ng-2.2.3-py2.py3-none-any.whl (232 kB)
+#11 8.517 Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl (15 kB)
+#11 8.525 Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+#11 8.533 Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+#11 8.540 Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+#11 8.547 Downloading asgiref-3.11.1-py3-none-any.whl (24 kB)
+#11 8.555 Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+#11 8.563 Downloading certifi-2026.5.20-py3-none-any.whl (134 kB)
+#11 8.571 Downloading click_didyoumean-0.3.1-py3-none-any.whl (3.6 kB)
+#11 8.579 Downloading click_plugins-1.1.1.2-py2.py3-none-any.whl (11 kB)
+#11 8.587 Downloading click_repl-0.3.0-py3-none-any.whl (10 kB)
+#11 8.596 Downloading django_timezone_field-7.2.1-py3-none-any.whl (13 kB)
+#11 8.604 Downloading filelock-3.29.0-py3-none-any.whl (39 kB)
+#11 8.612 Downloading frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (242 kB)
+#11 8.621 Downloading fsspec-2026.4.0-py3-none-any.whl (203 kB)
+#11 8.630 Downloading greenlet-3.5.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (611 kB)
+#11 8.638    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 611.4/611.4 kB 57.4 MB/s  0:00:00
+#11 8.642 Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+#11 8.649 Downloading jsonpointer-3.1.1-py3-none-any.whl (7.7 kB)
+#11 8.657 Downloading kombu-5.6.2-py3-none-any.whl (214 kB)
+#11 8.665 Downloading amqp-5.3.1-py3-none-any.whl (50 kB)
+#11 8.673 Downloading langchain_protocol-0.0.15-py3-none-any.whl (7.0 kB)
+#11 8.682 Downloading numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.6 MB)
+#11 8.745    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.6/16.6 MB 275.7 MB/s  0:00:00
+#11 8.748 Downloading orjson-3.11.9-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (134 kB)
+#11 8.757 Downloading ormsgpack-1.12.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (212 kB)
+#11 8.765 Downloading packaging-26.2-py3-none-any.whl (100 kB)
+#11 8.774 Downloading prompt_toolkit-3.0.52-py3-none-any.whl (391 kB)
+#11 8.783 Downloading propcache-0.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (61 kB)
+#11 8.792 Downloading python_crontab-3.3.0-py3-none-any.whl (27 kB)
+#11 8.800 Downloading requests_toolbelt-1.0.0-py2.py3-none-any.whl (54 kB)
+#11 8.808 Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+#11 8.817 Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB)
+#11 8.829    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 118.7 MB/s  0:00:00
+#11 8.831 Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+#11 8.839 Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+#11 8.846 Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+#11 8.854 Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#11 8.862 Downloading sqlparse-0.5.5-py3-none-any.whl (46 kB)
+#11 8.871 Downloading tqdm-4.67.3-py3-none-any.whl (78 kB)
+#11 8.880 Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+#11 8.889 Downloading tzdata-2026.2-py2.py3-none-any.whl (349 kB)
+#11 8.898 Downloading xxhash-3.7.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (193 kB)
+#11 8.907 Downloading zstandard-0.25.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (5.5 MB)
+#11 8.933    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.5/5.5 MB 223.4 MB/s  0:00:00
+#11 8.937 Downloading regex-2026.5.9-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (801 kB)
+#11 8.947    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 801.2/801.2 kB 74.0 MB/s  0:00:00
+#11 8.951 Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+#11 8.958 Downloading tzlocal-5.3.1-py3-none-any.whl (18 kB)
+#11 8.974 Downloading wcwidth-0.7.0-py3-none-any.whl (110 kB)
+#11 9.384 Installing collected packages: python-crontab, kafka-python, cron-descriptor, zstandard, xxhash, whitenoise, wcwidth, vine, uuid-utils, urllib3, tzlocal, tzdata, typing-extensions, tqdm, tenacity, sqlparse, sniffio, six, shellingham, regex, redis, pyyaml, python-dotenv, pygments, psycopg2-binary, propcache, pillow, packaging, ormsgpack, orjson, numpy, multidict, mdurl, kafka-python-ng, jsonpointer, jmespath, jiter, idna, httpx-sse, hf-xet, h11, greenlet, fsspec, frozenlist, filelock, distro, click, charset_normalizer, certifi, billiard, attrs, asgiref, annotated-types, annotated-doc, aiohappyeyeballs, yarl, typing-inspection, sqlalchemy, requests, python-dateutil, pydantic-core, prompt-toolkit, markdown-it-py, langchain-protocol, jsonpatch, httpcore, gunicorn, elastic-transport, Django, click-plugins, click-didyoumean, anyio, amqp, aiosignal, tiktoken, stripe, rich, requests-toolbelt, razorpay, pydantic, kombu, httpx, elasticsearch, django-timezone-field, django-storages, django-redis, click-repl, botocore, aiohttp, typer, s3transfer, pydantic-settings, openai, langsmith, langgraph-sdk, django-elasticsearch-dsl, celery, langchain-core, huggingface_hub, django-celery-beat, boto3, tokenizers, langgraph-checkpoint, langchain-text-splitters, langchain-openai, langgraph-prebuilt, langchain-huggingface, langchain-classic, langgraph, langchain-community, langchain
+#11 26.30 
+#11 26.30 Successfully installed Django-5.2.14 aiohappyeyeballs-2.6.2 aiohttp-3.13.5 aiosignal-1.4.0 amqp-5.3.1 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.13.0 asgiref-3.11.1 attrs-26.1.0 billiard-4.2.4 boto3-1.43.15 botocore-1.43.15 celery-5.6.3 certifi-2026.5.20 charset_normalizer-3.4.7 click-8.4.1 click-didyoumean-0.3.1 click-plugins-1.1.1.2 click-repl-0.3.0 cron-descriptor-1.4.5 distro-1.9.0 django-celery-beat-2.9.0 django-elasticsearch-dsl-8.2 django-redis-6.0.0 django-storages-1.14.6 django-timezone-field-7.2.1 elastic-transport-8.17.1 elasticsearch-8.19.3 filelock-3.29.0 frozenlist-1.8.0 fsspec-2026.4.0 greenlet-3.5.1 gunicorn-26.0.0 h11-0.16.0 hf-xet-1.5.0 httpcore-1.0.9 httpx-0.28.1 httpx-sse-0.4.3 huggingface_hub-1.16.4 idna-3.16 jiter-0.15.0 jmespath-1.1.0 jsonpatch-1.33 jsonpointer-3.1.1 kafka-python-2.3.1 kafka-python-ng-2.2.3 kombu-5.6.2 langchain-1.3.2 langchain-classic-1.0.7 langchain-community-0.4.2 langchain-core-1.4.0 langchain-huggingface-1.2.2 langchain-openai-1.2.2 langchain-protocol-0.0.15 langchain-text-splitters-1.1.2 langgraph-1.2.2 langgraph-checkpoint-4.1.1 langgraph-prebuilt-1.1.0 langgraph-sdk-0.3.15 langsmith-0.8.5 markdown-it-py-4.2.0 mdurl-0.1.2 multidict-6.7.1 numpy-2.4.6 openai-2.38.0 orjson-3.11.9 ormsgpack-1.12.2 packaging-26.2 pillow-12.2.0 prompt-toolkit-3.0.52 propcache-0.5.2 psycopg2-binary-2.9.12 pydantic-2.13.4 pydantic-core-2.46.4 pydantic-settings-2.14.1 pygments-2.20.0 python-crontab-3.3.0 python-dateutil-2.9.0.post0 python-dotenv-1.2.2 pyyaml-6.0.3 razorpay-2.0.1 redis-7.4.0 regex-2026.5.9 requests-2.34.2 requests-toolbelt-1.0.0 rich-15.0.0 s3transfer-0.17.1 shellingham-1.5.4 six-1.17.0 sniffio-1.3.1 sqlalchemy-2.0.50 sqlparse-0.5.5 stripe-15.1.0 tenacity-9.1.4 tiktoken-0.13.0 tokenizers-0.23.1 tqdm-4.67.3 typer-0.25.1 typing-extensions-4.15.0 typing-inspection-0.4.2 tzdata-2026.2 tzlocal-5.3.1 urllib3-2.7.0 uuid-utils-0.16.0 vine-5.1.0 wcwidth-0.7.0 whitenoise-6.12.0 xxhash-3.7.0 yarl-1.24.2 zstandard-0.25.0
+#11 26.30 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+#11 DONE 29.5s
+
+#12 [kafka-consumer 7/7] COPY . /app/
+#12 DONE 0.2s
+
+#13 [celery-beat] exporting to image
+#13 exporting layers
+#13 ...
+
+#14 [web] exporting to image
+#14 ...
+
+#15 [celery-worker] exporting to image
+#15 ...
+
+#16 [kafka-consumer] exporting to image
+#16 ...
+
+#15 [celery-worker] exporting to image
+#15 exporting layers 21.3s done
+#15 exporting manifest sha256:00f475e8ab522d3f58d10432b169197a303cb92985e69318f0ad768a57b5ee68 0.0s done
+#15 exporting config sha256:8614b585ac2c1f3f62c730a03b7ce15b3345af694ef55240f384f83557524677 0.0s done
+#15 exporting attestation manifest sha256:5876b298cf3b5dcfd6a668ff238d56a3da81b753ecfacb4109ec62445a8c36c3
+#15 exporting attestation manifest sha256:5876b298cf3b5dcfd6a668ff238d56a3da81b753ecfacb4109ec62445a8c36c3 0.1s done
+#15 exporting manifest list sha256:8d09698072d7be43ba24c924ee279ec18f3709596f9e7c784da7d1975b805f92 0.0s done
+#15 naming to docker.io/library/cricketstore-agent-refactor-celery-worker:latest 0.0s done
+#15 unpacking to docker.io/library/cricketstore-agent-refactor-celery-worker:latest
+#15 ...
+
+#16 [kafka-consumer] exporting to image
+#16 exporting layers 21.3s done
+#16 exporting manifest sha256:82769db8bbe8548c8a0244c5e1066fea24136adfc293c22f3b8fa5ad3aaaecbd 0.0s done
+#16 exporting config sha256:647434286fd46d108a44eaf8f618a91e98d1f8754396d7f43031a320dfbe7f4c 0.0s done
+#16 exporting attestation manifest sha256:ca31a697ff97718164b54c549bf32afb2f7ccc0a4dc2f41d511715d80c48eea9 0.1s done
+#16 exporting manifest list sha256:ab653dfde290acda99e0d9ab18fb6e092302ca1e62b8a222a9c5eb24a3e780cd 0.0s done
+#16 naming to docker.io/library/cricketstore-agent-refactor-kafka-consumer:latest done
+#16 unpacking to docker.io/library/cricketstore-agent-refactor-kafka-consumer:latest
+#16 ...
+
+#14 [web] exporting to image
+#14 exporting layers 21.3s done
+#14 exporting manifest sha256:31b5dc69d62083f5f3dee237430d45931a3da91f4a3109cdbff082b0a57e5f81 0.0s done
+#14 exporting config sha256:c53ca18e3a1f8d890cb9071cce764267ebe362c1131d50ec24d98f6fcd4b9392 0.0s done
+#14 exporting attestation manifest sha256:baa4b8a33567c73aa9de31c4a55abb9d99eed796ba978397f96d06be9640cf64 0.1s done
+#14 exporting manifest list sha256:9d9d5c17cac1e77f71d0ffe5c011da8cb7fd2cdc30ee5677df0aac946b2f2f6b 0.0s done
+#14 naming to docker.io/library/cricketstore-agent-refactor-web:latest 0.0s done
+#14 unpacking to docker.io/library/cricketstore-agent-refactor-web:latest
+#14 ...
+
+#13 [celery-beat] exporting to image
+#13 exporting layers 21.3s done
+#13 exporting manifest sha256:f4634cf063a47fe8e556f6476e30c09d5077616f3042d32f998d3dfff85c3523 0.0s done
+#13 exporting config sha256:f5667000bcf30bc3540df8fcb636e956d7f9fc80d5314113f570db9eda4b088c 0.0s done
+#13 exporting attestation manifest sha256:fa865a6191787abd5b28bd7f569d453f163f20b5d4d25aecc496b2d06f615626 0.1s done
+#13 exporting manifest list sha256:06bc1d66902b6fc6d8b477ff8fced210667e8d4ab3e20a29111c7ef05248f292 0.0s done
+#13 naming to docker.io/library/cricketstore-agent-refactor-celery-beat:latest 0.0s done
+#13 unpacking to docker.io/library/cricketstore-agent-refactor-celery-beat:latest
+#13 ...
+
+#14 [web] exporting to image
+#14 unpacking to docker.io/library/cricketstore-agent-refactor-web:latest 28.8s done
+#14 DONE 50.4s
+
+#13 [celery-beat] exporting to image
+#13 unpacking to docker.io/library/cricketstore-agent-refactor-celery-beat:latest 28.9s done
+#13 DONE 50.4s
+
+#16 [kafka-consumer] exporting to image
+#16 unpacking to docker.io/library/cricketstore-agent-refactor-kafka-consumer:latest 28.9s done
+#16 DONE 50.4s
+
+#15 [celery-worker] exporting to image
+#15 unpacking to docker.io/library/cricketstore-agent-refactor-celery-worker:latest 28.9s done
+#15 DONE 50.5s
+
+#17 [web] resolving provenance for metadata file
+#17 DONE 0.2s
+
+#18 [celery-beat] resolving provenance for metadata file
+#18 DONE 0.2s
+
+#19 [celery-worker] resolving provenance for metadata file
+#19 DONE 0.1s
+
+#20 [kafka-consumer] resolving provenance for metadata file
+#20 DONE 0.0s
+ Image cricketstore-agent-refactor-kafka-consumer Built 
+ Image cricketstore-agent-refactor-celery-beat Built 
+ Image cricketstore-agent-refactor-celery-worker Built 
+ Image cricketstore-agent-refactor-web Built 
+ Network cricketstore-agent-refactor_default Creating 
+ Network cricketstore-agent-refactor_default Created 
+ Volume cricketstore-agent-refactor_static_volume Creating 
+ Volume cricketstore-agent-refactor_static_volume Created 
+ Volume cricketstore-agent-refactor_es_data Creating 
+ Volume cricketstore-agent-refactor_es_data Created 
+ Container cricketstore_es Creating 
+ Container cricketstore_es Created 
+ Container cricketstore_web Creating 
+ Container cricketstore_web Created 
+ Container cricketstore_kafka_consumer Creating 
+ Container cricketstore_celery_worker Creating 
+ Container cricketstore_celery_beat Creating 
+ Container cricketstore_nginx Creating 
+ Container cricketstore_kafka_consumer Created 
+ Container cricketstore_celery_beat Created 
+ Container cricketstore_celery_worker Created 
+ Container cricketstore_nginx Created 
+ Container cricketstore_es Starting 
+ Container cricketstore_es Started 
+ Container cricketstore_es Waiting 
+ Container cricketstore_es Healthy 
+ Container cricketstore_web Starting 
+ Container cricketstore_web Started 
+ Container cricketstore_kafka_consumer Starting 
+ Container cricketstore_nginx Starting 
+ Container cricketstore_celery_worker Starting 
+ Container cricketstore_celery_beat Starting 
+ Container cricketstore_nginx Started 
+ Container cricketstore_celery_worker Started 
+ Container cricketstore_kafka_consumer Started 
+ Container cricketstore_celery_beat Started 

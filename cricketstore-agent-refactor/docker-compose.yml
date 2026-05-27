@@ -21,14 +21,7 @@ services:
   web:
     build: .
     container_name: cricketstore_web
-    command: >
-      sh -c "python manage.py migrate &&
-             python manage.py collectstatic --noinput &&
-             gunicorn --workers 3 --bind 0.0.0.0:8000
-               --timeout 120
-               --access-logfile -
-               --error-logfile -
-               cricketstore.wsgi:application"
+    command: sh -c "python manage.py migrate && python manage.py collectstatic --noinput && gunicorn --workers 3 --bind 0.0.0.0:8000 --timeout 120 cricketstore.wsgi:application"
     volumes:
       - static_volume:/app/staticfiles
     expose:
@@ -59,9 +52,7 @@ services:
   celery-beat:
     build: .
     container_name: cricketstore_celery_beat
-    command: >
-      celery -A cricketstore beat --loglevel=info
-        --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    command: celery -A cricketstore beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     depends_on:
       - web
     env_file:
@@ -83,18 +74,21 @@ services:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
     restart: always
+
   nginx:
     image: nginx:1.25-alpine
     container_name: cricketstore_nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - static_volume:/app/staticfiles:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - web
     restart: always
 
 volumes:
-  es_data:    
-  static_volume: 
+  es_data:
+  static_volume:

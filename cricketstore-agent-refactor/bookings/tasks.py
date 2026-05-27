@@ -54,7 +54,19 @@ def cleanup_expired_slots():
     logger.info(f"Unblocked {updated_count} expired slots.")
     return f"Unblocked {updated_count} expired slots."
 
+@shared_task
+def generate_slots_for_ground(ground_id):
+    ground = Ground.objects.get(id=ground_id)
 
+    today = timezone.localdate()
+
+    for i in range(60):
+        generateslots(
+            ground,
+            today + timedelta(days=i)
+        )
+
+    return f"Generated slots for {ground.name}"
 
 
 

@@ -8,7 +8,6 @@ __pycache__/
 .vscode/
 .idea/
 *.sqlite3
-nginx/
 media/
 staticfiles/
 .git/

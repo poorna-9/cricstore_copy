@@ -174,6 +174,9 @@ STORAGES = {
     'default': {
         'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
     },
+    'staticfiles': {
+        'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+    },
 }
 
 ELASTICSEARCH_DSL = {
@@ -211,8 +214,8 @@ FRONTEND_BASE_URL = os.getenv(
     "http://localhost:8000"
 )
 
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_CACHE_URL
+CELERY_BROKER_URL = REDIS_URL + "?ssl_cert_reqs=CERT_NONE"
+CELERY_RESULT_BACKEND = REDIS_CACHE_URL + "?ssl_cert_reqs=CERT_NONE"
 CELERY_TIMEZONE = "Asia/Kolkata"
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
