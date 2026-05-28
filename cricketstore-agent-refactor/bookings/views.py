@@ -615,16 +615,14 @@ from django.db import transaction
 
 def cancel_tournament_booking_session(t_session):
     slot_ids = Orders.objects.filter(
-        session=t_session,
+        tournament_session=t_session,
         Tournament_or_normal="tournament",
-    ).values_list('slot_id', flat=True)
-
+    ).values_list('slotsbooked_id', flat=True)
     with transaction.atomic():
         slots.objects.filter(id__in=slot_ids).update(
             is_blocked=False,
             blocked_at=None
         )
-
 def tournamentBookingPage(request, pk):
     today = date.today()
     ground = get_object_or_404(Ground, id=pk)
