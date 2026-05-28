@@ -3547,7 +3547,6 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
         if session:
             existing_session_key = f"session:{session.id}"
             if not redis_client.exists(existing_session_key):
-                # Redis expired — cancel old session, create fresh
                 cancel_normal_booking_session(session)
                 session = reservationsession.objects.create(
                     user=user,
@@ -3578,7 +3577,6 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
         else:
             remaining_seconds = ttl
         redis_client.expire(session_slots_key, remaining_seconds)
-        redis_client.expire(ground_date_key, remaining_seconds)
         locked_slot_ids = []
         for slot in matchslots:
             lock_key = f"lock:slot:{ground.id}:{slot.id}:{date_obj}"
@@ -3587,11 +3585,9 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
                 for sid in locked_slot_ids:
                     redis_client.delete(f"lock:slot:{ground.id}:{sid}:{date_obj}")
                     redis_client.srem(session_slots_key, str(sid))
-                    redis_client.srem(ground_date_key, str(sid))
                 return {'success': False, 'message': 'Some slots were just taken. Please try again.'}
             locked_slot_ids.append(slot.id)
             redis_client.sadd(session_slots_key, str(slot.id))
-            redis_client.sadd(ground_date_key, str(slot.id))
         return {
             'success': True,
             'message': 'Slots reserved successfully.',
