@@ -2439,8 +2439,16 @@ from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
 def userquerychatbot(request):
-    query = request.GET.get('query', '')
-    mode=request.GET.get("mode")
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body)
+        except json.JSONDecodeError:
+            body = {}
+        query = body.get("query", "")
+        mode = body.get("mode")
+    else:
+        query = request.GET.get("query", "")
+        mode = request.GET.get("mode")
     if not mode:
         return JsonResponse({'message':"Mode parameter is missing."})
     off_topic_keywords = [
