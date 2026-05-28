@@ -1,5 +1,23 @@
 services:
 
+  db:
+    image: postgres:15
+    container_name: cricketstore_db
+    restart: always
+    environment:
+      POSTGRES_DB: cricketstore
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
     container_name: cricketstore_es
@@ -29,11 +47,14 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
+      db:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
+      - DB_HOST=db
     restart: always
 
   celery-worker:
@@ -47,6 +68,7 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
+      - DB_HOST=db
     restart: always
 
   celery-beat:
@@ -60,6 +82,7 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
+      - DB_HOST=db
     restart: always
 
   kafka-consumer:
@@ -73,6 +96,7 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
+      - DB_HOST=db
     restart: always
 
   nginx:
@@ -92,3 +116,4 @@ services:
 volumes:
   es_data:
   static_volume:
+  postgres_data:

@@ -1,4 +1,5 @@
-from elasticsearch import logger
+import logging
+logger = logging.getLogger(__name__)
 
 from celery import shared_task
 from datetime import datetime, timedelta
@@ -54,9 +55,18 @@ def cleanup_expired_slots():
     logger.info(f"Unblocked {updated_count} expired slots.")
     return f"Unblocked {updated_count} expired slots."
 
+from celery.utils.log import get_task_logger
+logger = get_task_logger(__name__)
+
 @shared_task
 def generate_slots_for_ground(ground_id):
-    ground = Ground.objects.get(id=ground_id)
+    logger.info(f"🔥 generate_slots_for_ground called with ground_id={ground_id}")
+
+    try:
+        ground = Ground.objects.get(id=ground_id)
+    except Ground.DoesNotExist:
+        logger.error(f"❌ Ground NOT FOUND for id={ground_id}")
+        return f"Ground {ground_id} not found"
 
     today = timezone.localdate()
 
@@ -67,7 +77,6 @@ def generate_slots_for_ground(ground_id):
         )
 
     return f"Generated slots for {ground.name}"
-
 
 
 

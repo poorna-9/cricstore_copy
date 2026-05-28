@@ -91,9 +91,6 @@ DATABASES = {
         "PASSWORD": os.environ.get("DB_PASS", "postgres"),
         "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "5432"),
-        "OPTIONS": {
-            "sslmode": "require",  
-        },
     }
 }
 

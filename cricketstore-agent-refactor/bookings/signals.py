@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models.signals import post_save
 from django.contrib.auth.models import User
 from django.dispatch import receiver
@@ -19,4 +20,6 @@ def create_customer(sender, instance, created, **kwargs):
 @receiver(post_save, sender=Ground)
 def create_slots_for_new_ground(sender, instance, created, **kwargs):
     if created:
-        generate_slots_for_ground.delay(instance.id)
+        transaction.on_commit(
+            lambda: generate_slots_for_ground.delay(instance.pk)
+        )

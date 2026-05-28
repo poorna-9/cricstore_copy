@@ -566,14 +566,16 @@ def grounddetail(request, pk):
                 ]
             else:
                 userreservedslots = []
+    booked_id_list = list(booked.values_list("id", flat=True))
+    reserved_id_list = list(reserved.values_list("id", flat=True))
     context = {
         'ground': ground,
         'date': date_for_input,
         'today': today,
         'cities': cities,
         'selected_city': ground.city,
-        'reserved': reserved,
-        'booked': booked,
+        'reserved': reserved_id_list,
+        'booked': booked_id_list,
         'available': available,
         'all_slots': time_slots,
         'userreservedslots': userreservedslots,
