@@ -629,25 +629,30 @@ def tournamentBookingPage(request, pk):
     today = date.today()
     ground = get_object_or_404(Ground, id=pk)
     SHIFTS = ["morning", "afternoon", "evening", "night"]
+    SHIFT_END = {
+        "morning": time(11, 0),
+        "afternoon": time(15, 0),
+        "evening": time(19, 0),
+        "night": time(23, 0),
+    }
+    now = timezone.localtime()
+    today_date = now.date()
+    current_time = now.time()
     user = request.user if request.user.is_authenticated else None
     user_session_id = None
-
     if user:
         latest_session = tournamentsession.objects.filter(
             user=user,
             ground=ground,
         ).order_by('-created_at').first()
-
         if latest_session:
             session_key = f"tournament_session:{latest_session.id}"
             if redis_client.exists(session_key):
                 user_session_id = str(latest_session.id)
-
     dates = []
     user_reserved = {}
     others_reserved = {}
     booked = {}
-
     for i in range(30):
         d = today + timedelta(days=i)
         date_str = str(d)
@@ -656,6 +661,15 @@ def tournamentBookingPage(request, pk):
             "day_num": d.day
         })
         for shift in SHIFTS:
+            if d < today_date:
+                # entire past date — all shifts passed
+                booked.setdefault(date_str, []).append(shift)
+                continue
+            if d == today_date:
+                # today — check if shift end time has passed
+                if current_time >= SHIFT_END[shift]:
+                    booked.setdefault(date_str, []).append(shift)
+                    continue
             shift_lock_key = f"lock:shift:{ground.id}:{date_str}:{shift}"
             owner = redis_client.get(shift_lock_key)
             if owner:
@@ -665,15 +679,14 @@ def tournamentBookingPage(request, pk):
                 else:
                     others_reserved.setdefault(date_str, []).append(shift)
                 continue
-            is_booked = slots.objects.filter(
+            is_booked_db = slots.objects.filter(
                 ground=ground,
                 date=d,
                 shift=shift,
                 is_booked=True
             ).exists()
-            if is_booked:
+            if is_booked_db:
                 booked.setdefault(date_str, []).append(shift)
-
     context = {
         "ground": ground,
         "dates": dates,
@@ -875,31 +888,42 @@ def gettournamentreserveddays(request):
     ground_id = request.GET.get("ground_id")
     if not ground_id:
         return JsonResponse({"success": False, "message": "Missing ground_id"})
-
+    SHIFT_END = {
+        "morning": time(11, 0),
+        "afternoon": time(15, 0),
+        "evening": time(19, 0),
+        "night": time(23, 0),
+    }
+    now = timezone.localtime()
+    today_date = now.date()
+    current_time = now.time()
     today = date.today()
     SHIFTS = ["morning", "afternoon", "evening", "night"]
     user = request.user if request.user.is_authenticated else None
     user_session_id = None
-
     if user:
         latest_session = tournamentsession.objects.filter(
             user=user,
             ground_id=ground_id,
         ).order_by('-created_at').first()
-
         if latest_session:
             session_key = f"tournament_session:{latest_session.id}"
             if redis_client.exists(session_key):
                 user_session_id = str(latest_session.id)
-
     user_reserved = {}
     others_reserved = {}
     booked = {}
-
     for i in range(30):
         d = today + timedelta(days=i)
         date_str = str(d)
         for shift in SHIFTS:
+            if d < today_date:
+                booked.setdefault(date_str, []).append(shift)
+                continue
+            if d == today_date:
+                if current_time >= SHIFT_END[shift]:
+                    booked.setdefault(date_str, []).append(shift)
+                    continue
             shift_lock_key = f"lock:shift:{ground_id}:{date_str}:{shift}"
             owner = redis_client.get(shift_lock_key)
             if owner:
@@ -909,13 +933,14 @@ def gettournamentreserveddays(request):
                 else:
                     others_reserved.setdefault(date_str, []).append(shift)
                 continue
-            is_booked = slots.objects.filter(
+
+            is_booked_db = slots.objects.filter(
                 ground_id=ground_id,
                 date=d,
                 shift=shift,
                 is_booked=True
             ).exists()
-            if is_booked:
+            if is_booked_db:
                 booked.setdefault(date_str, []).append(shift)
 
     return JsonResponse({
@@ -925,7 +950,6 @@ def gettournamentreserveddays(request):
         "booked": booked,
         "session_id": user_session_id,
     })
-
 MAX_SLOTS_PER_SESSION = 6
 
 SESSION_TTL_SECONDS = 10 * 60
