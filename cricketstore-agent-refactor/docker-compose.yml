@@ -18,6 +18,21 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: cricketstore_redis
+    restart: always
+    command: redis-server --appendonly yes
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
     container_name: cricketstore_es
@@ -49,12 +64,16 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
       - DB_HOST=db
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis:6379/1
     restart: always
 
   celery-worker:
@@ -62,13 +81,20 @@ services:
     container_name: cricketstore_celery_worker
     command: celery -A cricketstore worker --loglevel=info --concurrency=2
     depends_on:
-      - web
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
       - DB_HOST=db
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis:6379/1
     restart: always
 
   celery-beat:
@@ -76,13 +102,20 @@ services:
     container_name: cricketstore_celery_beat
     command: celery -A cricketstore beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     depends_on:
-      - web
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
       - DB_HOST=db
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis:6379/1
     restart: always
 
   kafka-consumer:
@@ -90,13 +123,20 @@ services:
     container_name: cricketstore_kafka_consumer
     command: python manage.py run_kafka_consumers --instances 1
     depends_on:
-      - web
+      web:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
       - DEBUG=False
       - DB_HOST=db
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis:6379/1
     restart: always
 
   nginx:
@@ -117,3 +157,4 @@ volumes:
   es_data:
   static_volume:
   postgres_data:
+  redis_data:
