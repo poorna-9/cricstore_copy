@@ -95,13 +95,12 @@ DATABASES = {
 }
 
 
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-REDIS_CACHE_URL = os.environ.get('REDIS_CACHE_URL', REDIS_URL)
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+REDIS_CACHE_URL = os.environ.get("REDIS_CACHE_URL", "redis://localhost:6379/1")
 
 redis_client = redis.from_url(
     REDIS_URL,
-    decode_responses=False,
-    ssl_cert_reqs=None      
+    decode_responses=False
 )
 
 CACHES = {
@@ -111,9 +110,7 @@ CACHES = {
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
             "KEY_PREFIX": "cache",
-            "CONNECTION_POOL_KWARGS": {
-                "ssl_cert_reqs": None    
-            },
+            "CONNECTION_POOL_KWARGS": {},
         },
         "TIMEOUT": 3600
     }
@@ -211,8 +208,9 @@ FRONTEND_BASE_URL = os.getenv(
     "http://localhost:8000"
 )
 
-CELERY_BROKER_URL = REDIS_URL + "?ssl_cert_reqs=CERT_NONE"
-CELERY_RESULT_BACKEND = REDIS_CACHE_URL + "?ssl_cert_reqs=CERT_NONE"
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_CACHE_URL
+
 CELERY_TIMEZONE = "Asia/Kolkata"
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
