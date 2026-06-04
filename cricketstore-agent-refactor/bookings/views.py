@@ -154,6 +154,19 @@ def normalize_date_text(text):
 import re
 from datetime import datetime, timedelta, date
 def parse_natural_date(text):
+    today = datetime.now().date() 
+    text = text.lower().strip()
+    text = text.replace("tmrw", "tomorrow")
+    text = text.replace("tommorrow", "tomorrow")
+    text = text.replace("tomorow", "tomorrow")
+    if text in ["today", "today's"]:
+        return today
+    if text in ["tomorrow", "tomorrow's"]:
+        return today + timedelta(days=1)
+    if text == "yesterday":
+        return None
+    if text in ["day after tomorrow", "day after tmrw"]:
+        return today + timedelta(days=2)
     NUMBER_WORDS = {
     "one": 1,
     "two": 2,
