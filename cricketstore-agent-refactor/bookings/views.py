@@ -2526,7 +2526,7 @@ def userquerychatbot(request):
       "info_ground": "ground_info",
       "tellme": "ground_info",
       }
-      if raw_intent in ["show_ground","book","cancel_booking","reschedule","ground_info"]:
+      if raw_intent in ["show_ground","book","cancel_booking","reschedule","ground_info","general"]:
           normalized_intent = raw_intent
       else:
          normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
