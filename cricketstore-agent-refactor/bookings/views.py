@@ -2781,7 +2781,7 @@ def userquerychatbot(request):
             print(ground)
         elif ground.count() > 1:
            cities = Ground.objects.values_list('city', flat=True).distinct()
-           html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
+           html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": ground, "cities": cities, "selected_city":""},request=request)
            return JsonResponse({
            "message": "I found multiple grounds in that area. Please select one.",
             "html": html_page
