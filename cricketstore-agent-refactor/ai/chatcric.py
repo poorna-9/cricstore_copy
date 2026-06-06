@@ -119,7 +119,7 @@ RULES (VERY IMPORTANT):
 - Do NOT infer or change intent
 - Do NOT change booking_type
 - Do NOT hallucinate values
-
+- intent MUST always be empty string "" 
 Interpretation rules:
 - Location names (area, city) are NOT ground or turf names
 - Ground/turf names are usually proper names and may contain words like:
