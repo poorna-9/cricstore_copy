@@ -2450,7 +2450,7 @@ def price_gte_q(value):
 
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
-
+import re
 def userquerychatbot(request):
     if request.method == "POST":
         try:
@@ -2464,15 +2464,19 @@ def userquerychatbot(request):
         mode = request.GET.get("mode")
     if not mode:
         return JsonResponse({'message':"Mode parameter is missing."})
+    q_lower = query.lower()
     off_topic_keywords = [
         "who are you", "what are you", "hello", "hi", "hey",
         "what is cricket", "tell me about", "how are you",
         "what can you do", "help me", "what do you know"
     ]
-    q_lower = query.lower()
-    if any(kw in q_lower for kw in off_topic_keywords):
+    
+    if any(
+        re.search(rf'\b{re.escape(kw)}\b', q_lower)
+        for kw in off_topic_keywords
+    ):
         return JsonResponse({
-            "message": "I can help you with finding and booking sports grounds, checking availability, and managing your bookings. Try asking something like 'Show me cricket turfs in Bangalore' or 'Book a turf tomorrow evening'."
+            "message": "Hi,I can help you with finding and booking sports grounds, checking availability, and managing your bookings. Try asking something like 'Show me cricket turfs in Bangalore' or 'Book a turf tomorrow evening'."
         })
     rawrequired=request.GET.get("required_fields")
     if rawrequired:
