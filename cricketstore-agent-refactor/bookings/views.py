@@ -2481,14 +2481,19 @@ def userquerychatbot(request):
         mode = request.GET.get("mode")
     if not mode:
         return JsonResponse({'message':"Mode parameter is missing."})
-    rawrequired=request.GET.get("required_fields")
-    if rawrequired:
-        try:
-          required_fields = json.loads(rawrequired)
-        except json.JSONDecodeError:
-          required_fields = []
+    if request.method == "POST":
+       required_fields = body.get("required_fields", [])
+       if not isinstance(required_fields, list):
+         required_fields = []
     else:
-        required_fields = []
+       rawrequired = request.GET.get("required_fields")
+        if rawrequired:
+            try:
+                required_fields = json.loads(rawrequired)
+            except json.JSONDecodeError:
+                required_fields = []
+        else:
+            required_fields = []       
     if mode=="normal_booking":
       booking_type="normal_booking"
       print("Required fields sent to backend:", required_fields)
