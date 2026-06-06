@@ -2487,12 +2487,12 @@ def userquerychatbot(request):
          required_fields = []
     else:
        rawrequired = request.GET.get("required_fields")
-        if rawrequired:
+       if rawrequired:
             try:
                 required_fields = json.loads(rawrequired)
             except json.JSONDecodeError:
                 required_fields = []
-        else:
+       else:
             required_fields = []       
     if mode=="normal_booking":
       booking_type="normal_booking"
