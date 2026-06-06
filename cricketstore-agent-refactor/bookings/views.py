@@ -449,48 +449,30 @@ def parse_natural_timings(timings, shift=None, am_or_pm=None):
 
 
 def checkpage(request):
-    city=request.GET.get('city','')
-    searchquery=request.GET.get('q','')
-    ajax=request.GET.get('ajax')
+    city = request.GET.get('city', '')
+    searchquery = request.GET.get('q', '')
+    ajax = request.GET.get('ajax')
     grounds = Ground.objects.all()
     if city:
         grounds = grounds.filter(city=city)
     if searchquery:
-        gptresults = interpret_ground_query(searchquery)
-        filters = gptresults.get("filters", {})
-        avail_date_str = filters.get("available_date")
-        if avail_date_str:
-            parsed_date = parse_natural_date(avail_date_str)
-            if parsed_date:
-                request.session['selected_date'] = parsed_date.strftime('%Y-%m-%d')
         search_ids = GroundDocument.search().query(
             "multi_match",
             query=searchquery,
-            fields=["sporttype","name", "location","description","address","price"],
+            fields=["name", "address"],
             fuzziness="AUTO"
-        )
-        if filters.get("price"):
-            search_ids=search_ids.filter("match",price=filters["price"])
-        if filters.get("address"):
-            search_ids = search_ids.filter("match", address=filters["address"])
-        if filters.get("location"):
-            search_ids = search_ids.filter("match", location=filters["location"])
-        if filters.get("sporttype"):
-            search_ids = search_ids.filter("match", sporttype=filters["sporttype"])
-        if filters.get("name"):
-            search_ids= search_ids.filter("match", name=filters["name"])
-        search_ids=search_ids.execute()
+        ).execute()
         ground_ids = [int(hit.meta.id) for hit in search_ids]
         grounds = grounds.filter(id__in=ground_ids)
     if ajax:
-        data=[
-          {"id": g.id, "name": g.name, "imageURL": g.imageURL, "price": g.price} #type: ignore
+        data = [
+            {"id": g.id, "name": g.name, "imageURL": g.imageURL, "price": g.price}
             for g in grounds
-        ]  
-        return JsonResponse({'grounds':data})
-    cities= Ground.objects.values_list('city', flat=True).distinct()
-    return render(request, 'bookings/checkpage.html', {'grounds': grounds, 'cities': cities,'selected_city':city})
-    
+        ]
+        return JsonResponse({'grounds': data})
+    cities = Ground.objects.values_list('city', flat=True).distinct()
+    return render(request, 'bookings/checkpage.html', {'grounds': grounds, 'cities': cities, 'selected_city': city})
+
 def selectcity(request):
     cities=Ground.objects.values_list('city',flat=True).distinct()
     return render(request,'bookings/homepage.html',{'cities':cities})
