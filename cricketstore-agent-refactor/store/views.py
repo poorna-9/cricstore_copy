@@ -8,34 +8,16 @@ import json
 from .utils import cookiecart
 from .document import ProductDocument
 from ai.store import interpret_product_query
+
 def search_results(query):
-    gptresults= interpret_product_query(query)
     search = ProductDocument.search().query(
         "multi_match",
         query=query,
-        fields=["name", "manufacturer", "description","price","colour","material"],
+        fields=["name", "manufacturer", "description", "price", "colour"],
         fuzziness="AUTO"
     )
-    if gptresults.get("brand"):
-        search=search.filter("term",manufacturer=gptresults["brand"].lower())
-    if gptresults.get("category"):
-        search=search.filter("term",category=gptresults["category"].lower())
-    if gptresults.get("price_max"):
-        try:
-           price_max=float(gptresults["price_max"])
-           search=search.filter("range",price={"lte":price_max})
-        except ValueError:
-            pass
-    if gptresults.get("features"):
-        for feature in gptresults["features"]:
-            search=search.filter("term",features=feature.lower())
-    if gptresults.get("material"):
-        search=search.filter("term",material=gptresults["material"].lower())
-    if gptresults.get("name"):
-        search=search.filter("term",name=gptresults["name"].lower())
-    results = search.execute()  
-    product_ids = [int(hit.meta.id) for hit in results] 
-    
+    results = search.execute()
+    product_ids = [int(hit.meta.id) for hit in results]
     return Product.objects.filter(id__in=product_ids)
 
 def store(request,category_id=None):
