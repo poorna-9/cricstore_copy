@@ -37,7 +37,7 @@ class NormalBookingFilters(BaseModel):
 
 class NormalBookingSchema(BaseModel):
     booking_type: Literal["normal_booking"]
-    intent: Literal["show", "book", "cancel", "unknown",""]
+    intent: Literal["show", "book", "cancel", "unknown", "general", ""]
     query_text: str
     filters: NormalBookingFilters
 
@@ -58,6 +58,7 @@ CRITICAL RULES:
 - Missing or unknown values MUST be empty strings ""
 
 INTENT RULES:
+- "general" → user says hi, hello, thanks, or asks unrelated questions
 - "show" → user wants to search / view grounds
 - "book" → user wants to reserve slots
 - "cancel" → user wants to cancel booking

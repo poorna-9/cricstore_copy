@@ -2448,6 +2448,23 @@ def price_gte_q(value):
   Q(night_price__gte=value)
   )
 
+def handle_general_query(query):
+    from langchain_openai import ChatOpenAI
+    from langchain_core.prompts import ChatPromptTemplate
+    
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=settings.OPENAI_API_KEY)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are a friendly sports ground booking assistant. 
+Answer the user's general message warmly and briefly, then guide them toward booking or finding a ground.
+Keep responses under 2 sentences. End with a helpful nudge like:
+'Try asking: Show me cricket turfs in Bangalore' or 'You can say: Book a turf tomorrow evening'"""),
+        ("human", "{query}")
+    ])
+    chain = prompt | llm
+    response = chain.invoke({"query": query})
+    return response.content
+
+
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 import re
@@ -2464,20 +2481,6 @@ def userquerychatbot(request):
         mode = request.GET.get("mode")
     if not mode:
         return JsonResponse({'message':"Mode parameter is missing."})
-    q_lower = query.lower()
-    off_topic_keywords = [
-        "who are you", "what are you", "hello", "hi", "hey",
-        "what is cricket", "tell me about", "how are you",
-        "what can you do", "help me", "what do you know"
-    ]
-    
-    if any(
-        re.search(rf'\b{re.escape(kw)}\b', q_lower)
-        for kw in off_topic_keywords
-    ):
-        return JsonResponse({
-            "message": "Hi,I can help you with finding and booking sports grounds, checking availability, and managing your bookings. Try asking something like 'Show me cricket turfs in Bangalore' or 'Book a turf tomorrow evening'."
-        })
     rawrequired=request.GET.get("required_fields")
     if rawrequired:
         try:
@@ -2528,6 +2531,8 @@ def userquerychatbot(request):
       else:
          normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
       print("Normalized Intent:", normalized_intent)
+      if normalized_intent == "general":
+        return JsonResponse({"message": handle_general_query(query)})
       for k,v in output.get("filters", {}).items():
         if v not in ("", None):
             context[k]=v
@@ -2763,7 +2768,6 @@ def userquerychatbot(request):
                 return JsonResponse({'message': f"Please tell me the {field.replace('_', ' ')}.","required_fields":[field]})
         ground = Ground.objects.filter(
             name__icontains=context["ground_or_turf_name"],
-            city__icontains=context["city"],
             address__icontains=context["area"]
         )
         if ground.count() == 1:
