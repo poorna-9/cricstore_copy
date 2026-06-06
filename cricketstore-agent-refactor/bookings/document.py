@@ -13,12 +13,11 @@ class GroundDocument(Document):
     class Index:
         name = 'bookings-grounds'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
-
+    price = fields.TextField()
     class Django:
         model = Ground
         fields = [
             'id',
             'name',
             'address',
-            'price',
         ]
