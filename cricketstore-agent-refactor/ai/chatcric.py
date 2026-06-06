@@ -304,8 +304,10 @@ Rules:
 - Output JSON with keys:
     - route → "missing_fields" OR "full_parse"
     - confidence → a float between 0 and 1 (optional, default 1.0)
-- If reply only contains values for missing fields → route = "missing_fields"
-- If reply introduces booking intent, ground name, or new action → route = "full_parse"
+- If the user reply directly answers one or more of the missing fields → route = "missing_fields"
+- EVEN IF the reply contains a ground name, area, or city — if those are in the missing fields list → route = "missing_fields"
+- Only if the user introduces a completely NEW booking request or NEW intent unrelated to missing fields → route = "full_parse"
+- When in doubt → route = "full_parse"
 - Output STRICT JSON ONLY.
 """),
     ("human", """
