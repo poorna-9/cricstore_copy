@@ -2773,6 +2773,7 @@ def userquerychatbot(request):
                 return JsonResponse({'message': f"Please tell me the {field.replace('_', ' ')}.","required_fields":[field]})
         ground = Ground.objects.filter(
             name__icontains=context["ground_or_turf_name"],
+            city__icontains=context["city"],
             address__icontains=context["area"]
         )
         if ground.count() == 1:
