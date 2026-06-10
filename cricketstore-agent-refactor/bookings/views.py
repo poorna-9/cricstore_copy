@@ -3,7 +3,7 @@ from datetime import time, date, datetime, timedelta
 import json
 from django.urls import reverse
 from django.utils import timezone
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, request
 from django.shortcuts import render,get_object_or_404, redirect
 from .models import *
 from django.views.decorators.csrf import csrf_exempt
@@ -447,9 +447,10 @@ def parse_natural_timings(timings, shift=None, am_or_pm=None):
     print("opening", opening, "closing", closing)
     return opening, closing
 
-
+globalcity = None
 def checkpage(request):
     city = request.GET.get('city', '')
+    globalcity = city
     searchquery = request.GET.get('q', '')
     ajax = request.GET.get('ajax')
     grounds = Ground.objects.all()
@@ -2430,26 +2431,70 @@ def price_gte_q(value):
   Q(night_price__gte=value)
   )
 
-def handle_general_query(query):
+def handle_general_query(query, city=None):
     from langchain_openai import ChatOpenAI
     from langchain_core.prompts import ChatPromptTemplate
-    
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=settings.OPENAI_API_KEY)
+
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.7,
+        openai_api_key=settings.OPENAI_API_KEY
+    )
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are a friendly sports ground booking assistant. 
-Answer the user's general message warmly and briefly, then guide them toward booking or finding a ground.
-Keep responses under 2 sentences. End with a helpful nudge like:
-'Try asking: Show me cricket turfs in Bangalore' or 'You can say: Book a turf tomorrow evening'"""),
-        ("human", "{query}")
+        ("system", """
+You are a friendly sports ground booking assistant.
+
+The user's city may already be known.
+If a city is provided, NEVER ask for the city again.
+Use the city naturally in your response.
+
+Answer briefly and guide the user toward finding or booking a ground.
+Keep responses under 2 sentences.
+        """),
+        ("human", """
+User Query: {query}
+Known City: {city}
+        """)
     ])
+
     chain = prompt | llm
-    response = chain.invoke({"query": query})
+    response = chain.invoke({
+        "query": query,
+        "city": city or "Not provided"
+    })
+
     return response.content
+
 
 
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 import re
+from ai.chatcric import frame_chatbot_message
+
+def ask_user(context, backend_message, required_fields=None, extra=None, query="", html=None):
+    required_fields = required_fields or []
+    extra = extra or {}
+    try:
+        final_message = frame_chatbot_message(
+            query=query,
+            context=context,
+            backend_message=backend_message
+        )
+    except Exception as e:
+        print("frame_chatbot_message failed:", e)
+        final_message = backend_message
+
+    response = {
+        "message": final_message,
+        "required_fields": required_fields
+    }
+    if html is not None:
+        response["html"] = html
+    response.update(extra)
+    return JsonResponse(response)
+
 def userquerychatbot(request):
     if request.method == "POST":
         try:
@@ -2458,9 +2503,12 @@ def userquerychatbot(request):
             body = {}
         query = body.get("query", "")
         mode = body.get("mode")
+        action = body.get("action", "")
     else:
+        body = {}
         query = request.GET.get("query", "")
         mode = request.GET.get("mode")
+        action = request.GET.get("action", "")
     if not mode:
         return JsonResponse({'message':"Mode parameter is missing."})
     if request.method == "POST":
@@ -2519,7 +2567,8 @@ def userquerychatbot(request):
          normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
       print("Normalized Intent:", normalized_intent)
       if normalized_intent == "general":
-        return JsonResponse({"message": handle_general_query(query)})
+        context["city"] = globalcity
+        return JsonResponse({"message": handle_general_query(query, globalcity)})
       for k,v in output.get("filters", {}).items():
         if v not in ("", None):
             context[k]=v
@@ -2561,13 +2610,19 @@ def userquerychatbot(request):
           sport_type = "volleyball"
       outdoor_sports = ["cricket", "football", "hockey"]
       if not sport_type:
-        return JsonResponse({'message':"Which sport are you looking to book a ground for ?","required_fields":["sport_type"]})
+        return ask_user(
+            context,
+            "Ask the user which city they want to search grounds in.",
+            ["city"],
+
+        )
       if sport_type in outdoor_sports:
         if not ground_or_turf:
-            response_message = f"For {sport_type.capitalize()}, would you like to book a ground or a turf?,"
-            return JsonResponse({
-                "message": response_message,"required_fields":["ground_or_turf"],
-            })
+            return ask_user(
+                context,
+                "ask the user would they like to book a ground or a turf",
+                ["ground_or_turf"]
+            )
       else:
         ground_or_turf = "turf"
       context["sporttype"] = sport_type
@@ -2585,10 +2640,11 @@ def userquerychatbot(request):
          if context.get("date"):
             parsed_date=parse_natural_date(context["date"])
             if not parsed_date:
-             return JsonResponse({
-                "message": "I couldn't understand the date. Please say something like '28 Jan' or 'tomorrow'.",
-                "required_fields": ["date"]
-               })
+             return ask_user(
+                 context,
+                 "ask the user for perfect date like today or tomorrow or exact date ",
+                 ["date"]
+             )
             context["date"]=parsed_date.isoformat()
          if context.get("nearme") and not context.get("radius_km"):
             context["radius_km"] = 15
@@ -2622,7 +2678,11 @@ def userquerychatbot(request):
                 cities= Ground.objects.values_list('city', flat=True).distinct()
                 html_page = render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
                 return JsonResponse({"message":"these are the grounds near to you","html": html_page})
-            return JsonResponse({'message': "Please tell me which city you want to search grounds in.","required_fields":["city"]})
+            return ask_user(
+                context,
+                "ask user for  which city they want to search grounds in.",
+                ["city"]
+            )
          if context.get("city"):
             grounds = grounds.filter(city__icontains=context["city"])
             print("grounds by city:", grounds)
@@ -2685,7 +2745,8 @@ def userquerychatbot(request):
             grounds = grounds.filter(rating__gte=float(context["rating"]))
          cities= Ground.objects.values_list('city', flat=True).distinct()
          html_page = render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":context.get("city")},request=request)
-         return JsonResponse({"message":"these are grounds based on your requirements","html": html_page})
+         message = "These are grounds based on your requirements.Book from the list below."
+         return JsonResponse({"message":message,"html": html_page})
         if context.get("ground_or_turf_name"):
             if not context.get("area"):
                 return JsonResponse({'message': "Please tell me which area this ground is in","required_fields":["area"]})
@@ -2693,17 +2754,38 @@ def userquerychatbot(request):
                 name__icontains=context["ground_or_turf_name"],
                 city__icontains=context["city"],
                 address__icontains=context["area"]
-            ).first()
-            if not ground:
+            )
+            if len(ground) == 0:
                 grounds=Ground.objects.filter(address__icontains=context["area"])
                 cities= Ground.objects.values_list('city', flat=True).distinct()
                 html_page= render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-                return JsonResponse({'message': "I found multiple grounds in that area. Please select one from the list below.","html":html_page})
+                return ask_user(
+                    context=context,
+                    backend_message="I couldn't find a ground with that name in the specified area. Here are some grounds in that area. Please select one and book from the list below.",
+                    html=html_page
+                )
+            elif len(ground) > 1:
+                cities = Ground.objects.values_list('city', flat=True).distinct()
+                html_page = render_to_string("partials/partialcheckpage.html",{"grounds": ground, "cities": cities, "selected_city":""},request=request)
+                cities = Ground.objects.values_list('city', flat=True).distinct()
+                html_page = render_to_string("partials/partialcheckpage.html",{"grounds": ground, "cities": cities, "selected_city":""},request=request)
+                return ask_user(
+                    context=context,
+                    backend_message="I found multiple grounds with that name in the specified area. Please select one from the list below.",
+                    html=html_page
+                )
+            ground = ground.first()
             if context.get("open"):
                 if ground.opens:
-                    return JsonResponse({'message':"yes it's open"})
+                    return ask_user(
+                        context=context,
+                        backend_message="yes it's open"
+                    )
                 else:
-                    return JsonResponse({"message":"sorry today ground is closed "})
+                    return ask_user(
+                        context=context,
+                        backend_message="sorry today ground is closed"
+                    )
             date_str = context.get("date")
             if date_str:
                 try:
@@ -2733,26 +2815,33 @@ def userquerychatbot(request):
             return JsonResponse({"message":"check the ground details and its slot details","html":html_page})
       if bookingtype=="normal_booking" and context.get("intent") == "book":
         if not context.get("date"):
-            return JsonResponse({
-               "message": "Please tell me the date you want to book.",
-               "required_fields": ["date"]
-           })
+            return ask_user(
+                context,
+                "ask the user for which date they want to book the ground. They can say 'tomorrow', '28 Jan', or '2026-01-28'.",
+                ["date"]
+            )
         date_str = context["date"]
         print("Parsing date from user input:", date_str)
         parsed_date = parse_natural_date(date_str)
         print("Parsed date:", parsed_date)
         if not parsed_date:
-         return JsonResponse({
-        "message": f"I couldn’t understand the date '{date_str}'. Please specify a date like '28 Jan', 'tomorrow', or '2026-01-28'.",
-        "required_fields": ["date"]
-        })
+            message = f"I couldn’t understand the date '{date_str}'. Please specify a date like '28 Jan', 'tomorrow', or '2026-01-28'."
+            return ask_user(
+                context,
+                message,
+                ["date"]
+            )
         date_obj = parsed_date
         context["date"] = date_obj.isoformat()
         request.session.modified = True
         required_fields = ["ground_or_turf_name", "city", "area", "timings"]
         for field in required_fields:
             if not context.get(field):
-                return JsonResponse({'message': f"Please tell me the {field.replace('_', ' ')}.","required_fields":[field]})
+                return ask_user(
+                    context,
+                    f"ask the user for the {field.replace('_', ' ')}.",
+                    [field]
+                )
         ground = Ground.objects.filter(
             name__icontains=context["ground_or_turf_name"],
             city__icontains=context["city"],
@@ -2764,15 +2853,20 @@ def userquerychatbot(request):
         elif ground.count() > 1:
            cities = Ground.objects.values_list('city', flat=True).distinct()
            html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": ground, "cities": cities, "selected_city":""},request=request)
-           return JsonResponse({
-           "message": "I found multiple grounds in that area. Please select one.",
-            "html": html_page
-           })
+           return ask_user(
+               context,
+               "I found multiple grounds with that name in the specified area. Please select one from the list below.",
+               html=html_page
+           )
         else:
             cities = Ground.objects.values_list('city', flat=True).distinct()
             grounds=Ground.objects.filter(address__icontains=context["area"])
             html_page=render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-            return JsonResponse({'message': "There is no ground of that name ,I found multiple grounds in that area. Please select one from the list below.","html":html_page})
+            return ask_user(
+                context,
+                "There is no ground of that name ,I found multiple grounds in that area. Please select one from the list below.",
+                html=html_page 
+            )
         try:
             date_obj = datetime.strptime(context["date"], "%Y-%m-%d").date()
         except ValueError:
@@ -2782,19 +2876,40 @@ def userquerychatbot(request):
             context.get("timings"), context.get("sporttype"),context.get("ground_or_turf"), context.get("am_pm"),context.get("shift"),constraint
         )
         if not userslots:
-            return JsonResponse({
-                 "message": "I couldn’t understand the time. Please specify a time like '5 to 7 evening'.","required_fields":["timings"]
-                })
+            return ask_user(
+                context,
+                "I couldn’t understand the time. Please specify a time like '5 to 7 evening'.",
+                ["timings"]
+            )
         if len(userslots) > 2 and not context.get("hours"):
-            return JsonResponse({'message': f"Among all hours {context['timings']}, how many hours do you want to play?","required_fields":["hours"]})
+            return ask_user(
+                context,
+                f"You have selected {len(userslots)} hours. How many hours do you want to play?",
+                ["hours"]
+            )
         if context.get("hours"):
             hrs=parsehours(context.get("hours"))
             if not hrs:
-                return JsonResponse({'message': "I couldn't understand the number of hours you want to play. Please specify a number like '2' or 'three'.","required_fields":["hours"]})
+                return ask_user(
+                    context,
+                    "I couldn't understand the number of hours you want to play. Please specify a number like '2' or 'three'.",
+                    ["hours"]
+                )
             userneedstoplay = hrs
         else:
             userneedstoplay=len(userslots)
         print("User Slots:", userslots)
+        if action != "confirm_booking":
+            return JsonResponse({
+                "message": (
+                    f"Please confirm booking:\n\n"
+                    f"Ground: {ground.name}\n"
+                    f"Date: {date_obj}\n"
+                    f"Time: {context.get('timings')}\n"
+                    f"Hours: {userneedstoplay}"
+                ),
+                "show_confirm_button": True
+            })
         output_res = chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
         if not isinstance(output_res,dict):
             return JsonResponse({'message': 'Error reserving slots. Please try again.'})
@@ -2828,7 +2943,9 @@ def userquerychatbot(request):
                 .order_by("date")
             )
             if not upcoming_bookings.exists():
-                return JsonResponse({"message": "You have no upcoming bookings to cancel."})
+                return ask_user(
+                    {}, "user did not have any upcoming bookings to cancel."
+                )
             booking_id = request.GET.get("booking_id")
             if not booking_id:
                 options = []
@@ -2840,17 +2957,17 @@ def userquerychatbot(request):
                         "id": str(b.id),
                         "text": f"{b.ground.name} on {b.date} — Slots: {slot_times}"
                     })
-                return JsonResponse({
-                    "message": "Which booking would you like to cancel?",
-                    "options": options
-                })
+                return ask_user(
+                    {}, "Which booking would you like to cancel?",
+                    extra={"options": options} 
+                )
             booking = Bookings.objects.filter(id=booking_id, user=request.user).first()
             if not booking:
-                return JsonResponse({"message": "Invalid booking selected."})
+                return ask_user({}, "Invalid booking selected.")
             if booking.is_cancelled:
-                return JsonResponse({"message": "This booking is already cancelled."})
+                return ask_user({}, "This booking is already cancelled.")
             if booking.date < timezone.now().date():
-                return JsonResponse({"message": "You can't cancel this booking anymore."})
+                return ask_user({}, "You can't cancel this booking anymore.")
             cancel_booking(booking)
             return JsonResponse({
                 "message": f"Your booking is cancelled successfully. Refund of ₹{booking.price} is initiated."
@@ -2860,14 +2977,19 @@ def userquerychatbot(request):
     #############################################################################################################################################   
     if mode=="tournament":
       mode="tournament_booking"
-      rawrequired=request.GET.get("required_fields")
-      if rawrequired:
-        try:
-          required_fields = json.loads(rawrequired)
-        except json.JSONDecodeError:
-          required_fields = []
+      if request.method == "POST":
+        required_fields = body.get("required_fields", [])
+        if not isinstance(required_fields, list):
+            required_fields = []
       else:
-        required_fields = []
+        rawrequired=request.GET.get("required_fields")
+        if rawrequired:
+            try:
+             required_fields = json.loads(rawrequired)
+            except json.JSONDecodeError:
+             required_fields = []
+        else:
+            required_fields = []
       booking_type="tournament_booking"
       print("Required fields sent to backend:", required_fields)
       output = interpretgroundquery(query,booking_type,required_fields)  
@@ -2941,19 +3063,27 @@ def userquerychatbot(request):
           sport_type = "volleyball"
       outdoor_sports = ["cricket", "football", "hockey"]
       if not sport_type:
-        return JsonResponse({'message': "What sport is this tournament for?", "required_fields":["sport_type"]})
+        return ask_user(
+            context,
+            "Ask the user what sport they want to book the tournament for.",
+            ["sport_type"],
+
+        )
+
       if sport_type in outdoor_sports:
         if not ground_or_turf:
-            response_message = f"For {sport_type.capitalize()}, would you like to book a ground or a turf?,"
-            return JsonResponse({
-                "message": response_message,"required_fields":["ground_or_turf"],
-            })
+            return ask_user(
+                context,
+                f"For {sport_type.capitalize()}, do you want to book a ground or a turf?",
+                ["ground_or_turf"]
+            )
       if not ground_or_turf:
-          response_message = f"For tournaments, would you like to book a ground or a turf?"
-          return JsonResponse({
-             "message": response_message,
-             "required_fields": ["ground_or_turf"]
-            })
+          return ask_user(
+                context,
+                f"For tournaments, would you like to book a ground or a turf?",
+                ["ground_or_turf"]
+                )
+      context["sporttype"] = sport_type
       request.session.modified = True
       if sport_type:
        grounds = Ground.objects.filter(sporttype__icontains=sport_type)
@@ -3010,11 +3140,23 @@ def userquerychatbot(request):
                 return JsonResponse({"message":"these are the grounds near to you","html": html_page})
           if context.get("budget"):
                 if not context.get("total_matches"):
-                    return JsonResponse({"message":"please provide total no of matches in the tournament","required_fields":["total_matches"]})
+                    return ask_user(
+                        context,
+                        "please provide total no of matches in the tournament",
+                        ["total_matches"]
+                    )
                 if not context.get("overs_per_match"):
-                    return JsonResponse({"message":"please provide total no of overs per match","required_fields":["overs_per_match"]})
+                    return ask_user(
+                        context,
+                        "please provide total no of overs per match",
+                        ["overs_per_match"]
+                    )
                 if not context.get("start"):
-                    return JsonResponse({"message":"please provided start_date and end_date of tournament","required_fields":["start","end"]})
+                    return ask_user(
+                        context,
+                        "please provided start_date and end_date of tournament",
+                        ["start","end"]
+                    )
                 valid_grounds=[]
                 if context.get("start") and context.get("end"):
                  for g in grounds:
@@ -3033,15 +3175,18 @@ def userquerychatbot(request):
                     grs=Ground.objects.filter(city=context["city"])
                     cities= Ground.objects.values_list('city', flat=True).distinct()
                     html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-                    return JsonResponse({
-                        "message": "No grounds can host this tournament within your budget you can check in the grounds provided","html":html_page
-                        })
+                    return ask_user(
+                        context,
+                        "No grounds can host this tournament within your budget. Here are some grounds in the city. You can check their availability and prices and try adjusting your requirements.",
+                        html=html_page
+                    )
                 grounds=valid_grounds
                 html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-                return JsonResponse({
-                         "message": "These grounds fit your budget and schedule",
-                         "html": html_page
-                        })
+                return ask_user(
+                    context,
+                    "These grounds can host your tournament within your budget. Please select one from the list below.",
+                    html=html_page
+                )
         if context.get("ground_or_turf_name"):
             if not context.get("area") or not context.get("city"):
                 return JsonResponse({"message":"please provide city and area of the ground you are looking","required_fields":["area","city"]})
@@ -3056,19 +3201,25 @@ def userquerychatbot(request):
                 if context.get("city"):
                   fallback = fallback.filter(city=context["city"])
                 html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": fallback, "cities": cities, "selected_city":""},request=request)
-                return JsonResponse({
-                     "message": "Requested ground not found. Showing similar grounds.",
-                      "html": html_page
-                    })
+                return ask_user(
+                    context,
+                    "Requested ground not found. Showing similar grounds.",
+                    html=html_page
+                )
             if len(grounds)>1:
                 html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-                return JsonResponse({
-                     "message": "Multiple grounds of same name found. Please be more specific.",
-                      "html": html_page
-                    })
+                return ask_user(
+                    context,
+                    "Multiple grounds of same name found. Please be more specific.",
+                    html=html_page
+                )
             ground = grounds.first()
             if not context.get("start"):
-              return JsonResponse({"message": "Please provide the start date of your tournament.","required_fields":["start"]})
+              return ask_user(
+                  context,
+                  "Please provide the start date of your tournament.",
+                  ["start"]
+              )
             dicti = parse_date_constraints(context["start"],context.get("end"),context.get("total_days"))
             if not dicti["success"]:
               return JsonResponse({"message": dicti["message"]})
@@ -3101,9 +3252,17 @@ def userquerychatbot(request):
                   return JsonResponse({'message':"the availability of 30 days of that ground are", 'html': html_page})
             if context.get("budget"):
                 if not context.get("total_matches"):
-                    return JsonResponse({"message":"please provide total no of matches in the tournament","required_fields":["total_matches"]})
+                    return ask_user(
+                        context,
+                        "please provide total no of matches in the tournament",
+                        ["total_matches"]
+                    )
                 if not context.get("overs_per_match"):
-                    return JsonResponse({"message":"please provide total no of overs per match","required_fields":["overs_per_match"]})
+                    return ask_user(
+                        context,
+                        "please provide total no of overs per match",
+                        ["overs_per_match"]
+                    )
                 result=check(ground=ground,
                                  start=context["start"],
                                  end=context["end"],
@@ -3135,7 +3294,12 @@ def userquerychatbot(request):
                         "datelist":date_list,
                         }
                         html_page=render_to_string("bookings/tournament.html",context,request=request)
-                        return JsonResponse({'message':"the availability of 30 days of that ground are", 'html': html_page})
+                        message="the availability of 30 days of that ground are"
+                        return ask_user(
+                            context,
+                            message,
+                            html=html_page
+                        )
                 else:
                         grounds=Ground.objects.filter(city=context["city"])
                         valid_grounds=[]
@@ -3155,25 +3319,39 @@ def userquerychatbot(request):
                           grs=Ground.objects.filter(city=context["city"])
                           cities= Ground.objects.values_list('city', flat=True).distinct()
                           html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grs, "cities": cities, "selected_city":""},request=request)
-                          return JsonResponse({
-                            "message": "No grounds can host this tournament within your budget,the grounds of your city are provided below you can check them out",
-                            "html": html_page
-                           })
+                          return ask_user(
+                            context,
+                            "No grounds can host this tournament within your budget,the grounds of your city are provided below you can check them out",
+                            html=html_page
+                          )
                         grounds=valid_grounds
                         html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-                        return JsonResponse({
-                         "message": "These grounds fit your budget and schedule",
-                         "html": html_page
-                        })   
+                        return ask_user(
+                            context,
+                            "These grounds fit your budget and schedule",
+                            html=html_page
+                        )
 ##################################################################################################################################################
       if output.get("booking_type") == "tournament_booking" and output.get("intent") in ["book", "reserve", "schedule"]:
         context["stage"] = "collecting_tournament_details"
         if not context.get("ground_or_turf_name"):
-            return JsonResponse({"message":"please provide ground_or_turf_name and city and area of the ground you are looking","required_fields":["ground_or_turf_name"]})
+            return ask_user(
+                context,
+                "Please provide the name of the ground or turf you want to book for the tournament.",
+                ["ground_or_turf_name"]
+            )
         if not context.get("area"):
-            return JsonResponse({"message":"please provide area of the ground you are looking","required_fields":["area"]})
+            return ask_user(
+                context,
+                "Please provide the area of the ground you are looking for.",
+                ["area"]
+            )
         if not context.get("city"):
-            return JsonResponse({"message":"please provide area of the ground you are looking","required_fields":["city"]})
+            return ask_user(
+                context,
+                "Please provide the city of the ground you are looking for.",
+                ["city"]
+            )
         ground = Ground.objects.filter(
             name__icontains=context["ground_or_turf_name"],
             city__icontains=context["city"],
@@ -3182,12 +3360,24 @@ def userquerychatbot(request):
         if not ground:
             grounds=Ground.objects.filter(address__icontains=context["area"])
             html_page= render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-            return JsonResponse({'message': "I found multiple grounds in that area. Please select one from the list below.","html":html_page})
+            return ask_user(
+                context,
+                "I found multiple grounds in that area. Please select one from the list below.",
+                html=html_page
+            )
         if not context.get("start"):
-              return JsonResponse({"message": "Please provide the start date of your tournament.","required_fields":["start"]})
+              return ask_user(
+                  context,
+                  "Please provide the start date of your tournament.",
+                  ["start"]
+              )
         dicti = parse_date_constraints(context["start"],context.get("end"),context.get("total_days"))
         if not dicti["success"]:
-            return JsonResponse({"message": dicti["message"]})
+            return ask_user(
+                context,
+                dicti["message"],
+                ["start"]
+            )
         start, end = dicti["start"], dicti["end"]
         shiftsperday = shifts(context["shifts"], start,end)
         context["start"]=start.isoformat()
@@ -3207,7 +3397,11 @@ def userquerychatbot(request):
                 success,session_id=booktournament(request.user,ground,plan)
                 print("Booking result:", success, session_id)
                 if not success:
-                    return JsonResponse({"message": "cannot book someone else booked some shifts"})
+                    return ask_user(
+                        context,
+                        "cannot book someone else booked some shifts",
+                        ["ground_or_turf_name"]
+                    )
                 else:
                     context["stage"] = "awaiting_payment"
                     return JsonResponse({"message": "Tournament slots reserved. Please complete payment within 15 minutes.","redirect_url": reverse("tournamentcheckout", args=[session_id])})
@@ -3215,12 +3409,24 @@ def userquerychatbot(request):
                 grounds=Ground.objects.filter(city=context["city"])
                 cities= Ground.objects.values_list('city', flat=True).distinct()
                 html_page = render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-                return JsonResponse({"message":"these are the grounds near to you","html": html_page})
+                return ask_user(
+                    context,
+                    "these are the grounds near to you",
+                    html=html_page
+                )
         if context.get("budget"):
             if not context.get("total_matches"):
-                return JsonResponse({"message":"please provide total no of matches in the tournament","required_fields":["total_matches"]})
+                return ask_user(
+                    context,
+                    "please provide total no of matches in the tournament",
+                    ["total_matches"]
+                )
             if not context.get("overs_per_match"):
-                return JsonResponse({"message":"please provide total no of overs per match","required_fields":["overs_per_match"]})
+                return ask_user(
+                    context,
+                    "please provide total no of overs per match",
+                    ["overs_per_match"]
+                )
             dicti=check(ground=ground,
                         start=context["start"],
                         end=context["end"],
@@ -3245,23 +3451,28 @@ def userquerychatbot(request):
                             if result["success"] and result["schedule"]:
                               valid_grounds.append(g)
                 if not valid_grounds:
-                    return JsonResponse({
-                            "message": "No grounds can host this tournament within your budget"
-                           })
+                    return ask_user(
+                        context,
+                        "No grounds can host this tournament within your budget",
+                        ["ground_or_turf_name"]
+                    )
                 html_page = render_to_string(
                           "partials/partialcheckpage.html",
                            {"grounds": valid_grounds, "cities": cities, "selected_city":""},
                            request=request
                            )
-                return JsonResponse({
-                         "message": "These grounds fit your budget and schedule",
-                         "html": html_page
-                        })
+                return ask_user(
+                    context,
+                    "These grounds fit your budget and schedule",
+                    html=html_page
+                        )
             else:
                 if not dicti.get("schedule"):
-                    return JsonResponse({
-                        "message": "No valid schedule found for the tournament within your budget."
-                    })
+                    return ask_user(
+                        context,
+                        "No valid schedule found for the tournament within your budget.",
+                        ["start"]
+                    )
                 try:
                   success, session_id = booktournament(request.user, ground, plan)
                 except Exception as e:

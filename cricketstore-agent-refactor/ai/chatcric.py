@@ -475,8 +475,8 @@ def frame_chatbot_message(query, context, backend_message):
         result = chatbot_ask_chain.invoke({
             "context": json.dumps(context, default=str),
             "backend_message": backend_message,
+            "query": query
         })
-
         return result.message
 
     except Exception as e:
