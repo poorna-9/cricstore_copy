@@ -10,10 +10,8 @@
 
   let currentMode = null;
   let pendingRequiredFields = [];
-  let lastQuery = "";   // ✅ STORE LAST QUERY
-  let redirecting=false;
-
-  /* ---------- UI HELPERS ---------- */
+  let lastQuery = "";
+  let redirecting = false;
 
   function addUserMessage(text) {
     const msg = document.createElement("div");
@@ -37,17 +35,27 @@
 
   function showQuickReplies(options = []) {
     clearQuickReplies();
+
     options.forEach((option) => {
       const btn = document.createElement("button");
       btn.className = "quick-reply";
       btn.textContent = option.text;
+
       btn.onclick = () => {
         if (option.modeSelection) {
           handleModeSelection(option.text);
           return;
         }
+
+        if (option.confirmBooking) {
+          addUserMessage("Confirm Booking");
+          sendQuery("", { action: "confirm_booking" });
+          return;
+        }
+
         sendQuery(option.text || "", option.id ? { booking_id: option.id } : {});
       };
+
       quickReplies.appendChild(btn);
     });
   }
@@ -58,10 +66,9 @@
     chatInput.focus();
   }
 
-  /* ---------- MODE SELECTION ---------- */
-
   function showModeSelection() {
     addBotMessage("What would you like to do today?");
+
     showQuickReplies([
       { text: "Normal Booking", modeSelection: true },
       { text: "Tournament Booking", modeSelection: true },
@@ -79,23 +86,22 @@
     };
 
     currentMode = modeMap[text];
+
     addUserMessage(text);
     clearQuickReplies();
 
     modeLabel.textContent = `Mode: ${text}`;
     addBotMessage(`${text} selected.`);
     addBotMessage("Tell me your requirement.");
+
     enableChat();
   }
 
-  /* ---------- CORE SEND FUNCTION ---------- */
-
   async function sendQuery(query = "", extraPayload = {}) {
-
     if (!currentMode) return;
 
     if (query) {
-      lastQuery = query;              // ✅ SAVE QUERY
+      lastQuery = query;
       addUserMessage(query);
       chatInput.value = "";
     }
@@ -118,22 +124,39 @@
 
       const data = await response.json();
 
-      /* -------- LOCATION REQUIRED -------- */
       if (data.html) {
         agentContent.innerHTML = data.html;
       }
+
       if (data.redirect_url) {
         if (redirecting) return;
+
         redirecting = true;
         addBotMessage("Redirecting to checkout page...");
         chatInput.disabled = true;
         sendBtn.disabled = true;
+        clearQuickReplies();
+
         window.location.replace(data.redirect_url);
         return;
       }
 
       if (data.message) {
         addBotMessage(data.message);
+      }
+
+      if (data.show_confirm_button) {
+        pendingRequiredFields = [];
+
+        showQuickReplies([
+          {
+            text: "Confirm Booking",
+            confirmBooking: true,
+          },
+        ]);
+
+        enableChat();
+        return;
       }
 
       if (Array.isArray(data.required_fields)) {
@@ -145,22 +168,18 @@
       if (data.options) {
         showQuickReplies(data.options);
       } else {
+        clearQuickReplies();
         enableChat();
       }
-
     } catch (err) {
       console.error(err);
       addBotMessage("Something went wrong. Please try again.");
     }
   }
 
-  /* ---------- LOCATION RESUME ---------- */
-  // ✅ CALLED FROM location.js AFTER SUCCESS
   window.resendLastQuery = function () {
-    sendQuery("");   // 🔥 SAME ENDPOINT, NO USER INPUT
+    sendQuery("");
   };
-
-  /* ---------- EVENTS ---------- */
 
   chatForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -173,8 +192,6 @@
       chatForm.dispatchEvent(new Event("submit"));
     }
   });
-
-  /* ---------- INIT ---------- */
 
   addBotMessage("Hi! I'm your Booking Agent 🤖");
   showModeSelection();

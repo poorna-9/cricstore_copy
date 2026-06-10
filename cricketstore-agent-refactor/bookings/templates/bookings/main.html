@@ -41,8 +41,8 @@
                 </li>
                 {% endif %}
             </ul>
-            <form class="form-inline my-2 my-lg-0" method="GET" action="{% url 'store' %}" id="navbar-search-form">
-                <input id="search-input" class="form-control mr-2" type="search" placeholder="AI-Search Venues" 
+            <form class="form-inline my-2 my-lg-0" method="GET" action="{% url 'grounds_page' %}" id="navbar-search-form">
+                <input id="search-input" class="form-control mr-2" type="search" placeholder="Search Venues" 
                        aria-label="Search" name="q" autocomplete="off">
                 <button id="search-button" class="btn btn-outline-success" type="submit">Search</button>
                 <div id="suggestions" class="suggestion-box"></div>

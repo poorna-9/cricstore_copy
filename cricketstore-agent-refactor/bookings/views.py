@@ -2463,14 +2463,19 @@ def userquerychatbot(request):
         mode = request.GET.get("mode")
     if not mode:
         return JsonResponse({'message':"Mode parameter is missing."})
-    rawrequired=request.GET.get("required_fields")
-    if rawrequired:
-        try:
-          required_fields = json.loads(rawrequired)
-        except json.JSONDecodeError:
-          required_fields = []
+    if request.method == "POST":
+       required_fields = body.get("required_fields", [])
+       if not isinstance(required_fields, list):
+         required_fields = []
     else:
-        required_fields = []
+       rawrequired = request.GET.get("required_fields")
+       if rawrequired:
+            try:
+                required_fields = json.loads(rawrequired)
+            except json.JSONDecodeError:
+                required_fields = []
+       else:
+            required_fields = []       
     if mode=="normal_booking":
       booking_type="normal_booking"
       print("Required fields sent to backend:", required_fields)
@@ -2508,7 +2513,7 @@ def userquerychatbot(request):
       "info_ground": "ground_info",
       "tellme": "ground_info",
       }
-      if raw_intent in ["show_ground","book","cancel_booking","reschedule","ground_info"]:
+      if raw_intent in ["show_ground","book","cancel_booking","reschedule","ground_info","general"]:
           normalized_intent = raw_intent
       else:
          normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
@@ -2750,6 +2755,7 @@ def userquerychatbot(request):
                 return JsonResponse({'message': f"Please tell me the {field.replace('_', ' ')}.","required_fields":[field]})
         ground = Ground.objects.filter(
             name__icontains=context["ground_or_turf_name"],
+            city__icontains=context["city"],
             address__icontains=context["area"]
         )
         if ground.count() == 1:
@@ -2757,7 +2763,7 @@ def userquerychatbot(request):
             print(ground)
         elif ground.count() > 1:
            cities = Ground.objects.values_list('city', flat=True).distinct()
-           html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
+           html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": ground, "cities": cities, "selected_city":""},request=request)
            return JsonResponse({
            "message": "I found multiple grounds in that area. Please select one.",
             "html": html_page

@@ -431,3 +431,56 @@ def interpretgroundquery(user_query, booking_type, required_fields):
             "intent": "show",
             "query_text": user_query
         }
+    
+class ChatbotAskSchema(BaseModel):
+    message: str
+
+chatbot_ask_parser = PydanticOutputParser(
+    pydantic_object=ChatbotAskSchema
+)
+
+chatbot_ask_prompt = ChatPromptTemplate.from_messages([
+    ("system", """
+You are a friendly sports ground booking assistant.
+
+Your job:
+- Rewrite the backend instruction into a natural chatbot message.
+- Use the current context to make the question clear.
+- Do NOT change the meaning.
+- Do NOT invent details.
+- Do NOT ask extra questions.
+- Return ONLY valid JSON.
+- Output must contain only this key: message.
+
+{format_instructions}
+"""),
+    ("human", """
+User query:
+{query}
+
+Current booking context:
+{context}
+
+Backend instruction:
+{backend_message}
+""")
+]).partial(
+    format_instructions=chatbot_ask_parser.get_format_instructions()
+)
+
+chatbot_ask_chain = chatbot_ask_prompt | normal_llm | chatbot_ask_parser
+
+def frame_chatbot_message(query, context, backend_message):
+    try:
+        result = chatbot_ask_chain.invoke({
+            "context": json.dumps(context, default=str),
+            "backend_message": backend_message,
+        })
+
+        return result.message
+
+    except Exception as e:
+        print("Chatbot ask LLM failed:", e)
+        return backend_message
+    
+
