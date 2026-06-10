@@ -46,10 +46,9 @@
           handleModeSelection(option.text);
           return;
         }
-
-        if (option.confirmBooking) {
-          addUserMessage("Confirm Booking");
-          sendQuery("", { action: "confirm_booking" });
+        if (option.action) {
+          addUserMessage(option.text);
+          sendQuery("", { action: option.action });
           return;
         }
 
@@ -148,11 +147,9 @@
       if (data.show_confirm_button) {
         pendingRequiredFields = [];
 
-        showQuickReplies([
-          {
-            text: "Confirm Booking",
-            confirmBooking: true,
-          },
+        showQuickReplies(data.options || [
+          { text: "Yes", action: "confirm_booking" },
+          { text: "No", action: "cancel_confirm_booking" },
         ]);
 
         enableChat();
