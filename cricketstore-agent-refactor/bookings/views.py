@@ -2543,12 +2543,10 @@ def userquerychatbot(request):
             body = {}
         query = body.get("query", "")
         mode = body.get("mode")
-        action = body.get("action", "")
     else:
         body = {}
         query = request.GET.get("query", "")
         mode = request.GET.get("mode")
-        action = request.GET.get("action", "")
     if not mode:
         return JsonResponse({'message':"Mode parameter is missing."})
     if request.method == "POST":
@@ -2939,17 +2937,6 @@ def userquerychatbot(request):
         else:
             userneedstoplay=len(userslots)
         print("User Slots:", userslots)
-        if action != "confirm_booking":
-            return JsonResponse({
-                "message": (
-                    f"Please confirm booking:\n\n"
-                    f"Ground: {ground.name}\n"
-                    f"Date: {date_obj}\n"
-                    f"Time: {context.get('timings')}\n"
-                    f"Hours: {userneedstoplay}"
-                ),
-                "show_confirm_button": True
-            })
         output_res = chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
         if not isinstance(output_res,dict):
             return JsonResponse({'message': 'Error reserving slots. Please try again.'})
