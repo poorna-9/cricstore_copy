@@ -2914,11 +2914,31 @@ def userquerychatbot(request):
             context.get("timings"), context.get("sporttype"),context.get("ground_or_turf"), context.get("am_pm"),context.get("shift"),constraint
         )
         if not userslots:
-            return ask_user(
-                context,
-                "I couldn’t understand the time. Please specify a time like '5 to 7 evening'.",
-                ["timings"]
-            )
+            SHIFT_RANGES = {
+                "morning":   (6, 11),
+                "afternoon": (12, 17),
+                "evening":   (15, 20),
+                "night":     (20, 24),
+            }
+            
+            shift = (context.get("shift") or "").lower().strip()
+            if shift and shift in SHIFT_RANGES and userslots:
+                shift_start, shift_end = SHIFT_RANGES[shift]
+                slot_hours = [int(str(s).split(":")[0]) for s in userslots]
+                if not any(shift_start <= h <= shift_end for h in slot_hours):
+                    return ask_user(
+                        context,
+                        f"You mentioned '{shift}' but your timings don't fall in that shift. "
+                        f"{shift.capitalize()} slots are between {shift_start}:00 and {shift_end}:00. "
+                        f"Please correct your timings or shift.",
+                        ["timings", "shift"]
+                    )
+            else:
+                return ask_user(
+                    context,
+                    "I couldn’t understand the time. Please specify a time like '5 to 7 evening'.",
+                    ["timings"]
+                )
         if len(userslots) > 2 and not context.get("hours"):
             return ask_user(
                 context,
