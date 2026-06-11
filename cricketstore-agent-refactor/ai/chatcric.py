@@ -374,7 +374,7 @@ def interpretgroundquery(user_query, booking_type, required_fields):
                     "query": user_query
                 })
                 data = output.dict()
-                data["intent"] = data.get("intent") or "unknown"
+                data["intent"] = "unknown"
                 data["booking_type"] = booking_type 
             else:
                 output = normal_chain.invoke({"query": user_query})
@@ -408,7 +408,7 @@ def interpretgroundquery(user_query, booking_type, required_fields):
                     "query": user_query
                 })
                 data = output.dict()
-                data["intent"] = data.get("intent") or "unknown"
+                data["intent"] = "unknown"
                 data["booking_type"] = booking_type
             else:
                 output = tournament_chain.invoke({"query": user_query})
