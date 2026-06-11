@@ -2623,7 +2623,7 @@ def userquerychatbot(request):
          "kolkata": ["kolkata", "calcutta"],
          "hyderabad": ["hyderabad", "hyd"],
          }
-      context["city"]= context.get("city", "").lower().strip()
+      context["city"]= (context.get("city") or "").lower().strip()
       for standard_city, variants in CITY_MAP.items():
         if context["city"] in variants:
             context["city"] = standard_city
