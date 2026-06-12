@@ -2512,6 +2512,16 @@ from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 import re
 from ai.chatcric import frame_chatbot_message
+from difflib import get_close_matches
+
+KNOWN_CITIES = ["bangalore", "mumbai", "delhi", "chennai", "kolkata", "hyderabad"]
+
+def normalize_city(city_input):
+    if not city_input:
+        return ""
+    city_input = city_input.lower().strip()
+    matches = get_close_matches(city_input, KNOWN_CITIES, n=1, cutoff=0.6)
+    return matches[0] if matches else city_input
 
 def ask_user(context, backend_message, required_fields=None, extra=None, query="", html=None):
     required_fields = required_fields or []
@@ -2623,11 +2633,7 @@ def userquerychatbot(request):
          "kolkata": ["kolkata", "calcutta"],
          "hyderabad": ["hyderabad", "hyd"],
          }
-      context["city"]= (context.get("city") or "").lower().strip()
-      for standard_city, variants in CITY_MAP.items():
-        if context["city"] in variants:
-            context["city"] = standard_city
-            break
+      context["city"] = normalize_city(context.get("city"))
       request.session.modified = True
       print("Updated Chatbot Context:",context)
       sport_type = (context.get("sporttype") or "").lower().strip()
@@ -3077,7 +3083,8 @@ def userquerychatbot(request):
           normalized_intent = raw_intent
       else:
          normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
-      print("Normalized Intent:", normalized_intent)
+      if context.get("city"):
+        context["city"] = normalize_city(context.get("city"))
       for k,v in output.get("filters", {}).items():
         if k=="shifts":
            if any(v.get(h) for h in ("start_day", "middle_days", "end_day")):
@@ -3406,6 +3413,7 @@ def userquerychatbot(request):
         ).first()
         if not ground:
             grounds=Ground.objects.filter(address__icontains=context["area"])
+            cities= Ground.objects.values_list('city', flat=True).distinct()
             html_page= render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
             return ask_user(
                 context,
@@ -3498,6 +3506,7 @@ def userquerychatbot(request):
                             if result["success"] and result["schedule"]:
                               valid_grounds.append(g)
                 if not valid_grounds:
+                    cities = Ground.objects.values_list('city', flat=True).distinct()
                     return ask_user(
                         context,
                         "No grounds can host this tournament within your budget",
@@ -3521,6 +3530,7 @@ def userquerychatbot(request):
                         ["start"]
                     )
                 try:
+                  plan = build_plan_from_shifts(dicti["schedule"])
                   success, session_id = booktournament(request.user, ground, plan)
                 except Exception as e:
                   return JsonResponse({"message": f"Booking failed: {str(e)}"})
