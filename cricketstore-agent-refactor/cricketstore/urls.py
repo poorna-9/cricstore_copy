@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path,include
 from django.conf.urls.static import static
 from django.conf import settings
+from django.http import HttpResponse
 def loaderio_verify(request):
     return HttpResponse("loaderio-f2c7f06c91b90ddb12bf8c2c4675a883")
     
