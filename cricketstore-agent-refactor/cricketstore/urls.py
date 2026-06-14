@@ -18,10 +18,14 @@ from django.contrib import admin
 from django.urls import path,include
 from django.conf.urls.static import static
 from django.conf import settings
+def loaderio_verify(request):
+    return HttpResponse("loaderio-f2c7f06c91b90ddb12bf8c2c4675a883")
+    
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('',include('store.urls')),
     path('bookings/',include('bookings.urls')),
+    path('loaderio-f2c7f06c91b90ddb12bf8c2c4675a883/', loaderio_verify),
 ]
 
 if settings.DEBUG:
