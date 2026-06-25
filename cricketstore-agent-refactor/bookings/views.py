@@ -2515,13 +2515,48 @@ from ai.chatcric import frame_chatbot_message
 from difflib import get_close_matches
 
 KNOWN_CITIES = ["bangalore", "mumbai", "delhi", "chennai", "kolkata", "hyderabad"]
+CITY_ALIASES = {
+    "bangalore": ["bangalore", "bengaluru", "banglore", "bglr"],
+    "mumbai": ["mumbai", "bombay"],
+    "delhi": ["delhi", "new delhi", "ndls"],
+    "chennai": ["chennai", "madras"],
+    "kolkata": ["kolkata", "calcutta"],
+    "hyderabad": ["hyderabad", "hyd"],
+}
+
 
 def normalize_city(city_input):
     if not city_input:
         return ""
+
     city_input = city_input.lower().strip()
-    matches = get_close_matches(city_input, KNOWN_CITIES, n=1, cutoff=0.6)
-    return matches[0] if matches else city_input
+
+    for canonical, aliases in CITY_ALIASES.items():
+        if city_input == canonical or city_input in aliases:
+            return canonical
+
+        matches = get_close_matches(
+            city_input,
+            aliases + [canonical],
+            n=1,
+            cutoff=0.7
+        )
+        if matches:
+            return canonical
+
+    return city_input
+
+
+def build_city_query(city):
+    city = normalize_city(city)
+
+    aliases = CITY_ALIASES.get(city, [city])
+
+    q = Q()
+    for alias in aliases:
+        q |= Q(city__icontains=alias)
+
+    return q
 
 def ask_user(context, backend_message, required_fields=None, extra=None, query="", html=None):
     required_fields = required_fields or []
@@ -2728,7 +2763,10 @@ def userquerychatbot(request):
                 ["city"]
             )
          if context.get("city"):
-            grounds = grounds.filter(city__icontains=context["city"])
+            context["city"] = normalize_city(context.get("city"))
+            print("city used for filtering:", context["city"])
+            print("all DB cities:", list(Ground.objects.values_list("city", flat=True).distinct()))
+            grounds = grounds.filter(build_city_query(context["city"]))
             print("grounds by city:", grounds)
          if context.get("area"):
             grounds = grounds.filter(address__icontains=context["area"])
@@ -3164,7 +3202,11 @@ def userquerychatbot(request):
             html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
             return JsonResponse({"message":"these are the grounds near to you","html": html_page})
           if context.get("city"):
-               grounds=grounds.filter(city__icontains=context["city"])
+               context["city"] = normalize_city(context.get("city"))
+               print("city used for filtering:", context["city"])
+               print("all DB cities:", list(Ground.objects.values_list("city", flat=True).distinct()))
+               grounds = grounds.filter(build_city_query(context["city"]))
+               print("grounds by city:", grounds)
           if context.get("area"):
                grounds = grounds.filter(address__icontains=context["area"])
           if context.get("rating_min"):
