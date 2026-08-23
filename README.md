@@ -126,8 +126,7 @@ As part of preparing this project for the Razorpay Buildathon, the following fix
 | 1 | Razorpay signature was compared with `==`, which is vulnerable to timing attacks | Switched to `hmac.compare_digest()` for constant-time comparison |
 | 2 | `payment_success` had no idempotency check — a duplicate callback/retry could double-book slots and create duplicate orders | Added a guard that checks `payment.status` before running fulfillment logic, so repeat calls are safely no-ops |
 | 3 | Money amounts were calculated using Python `float`, risking rounding drift on prices | Switched price/total calculations to Python's `Decimal` type |
-| 4 | A third-party API key (LocationIQ) was hardcoded in source | Moved to an environment variable via Django settings, and the exposed key was rotated |
-| 5 | `@csrf_exempt` was applied to an authenticated, non-webhook endpoint (`reservetournamentday`) with no equivalent protection in its place | Removed `csrf_exempt`; the endpoint now relies on Django's standard CSRF token flow. `payment_success` retains `csrf_exempt` intentionally, since it is protected by Razorpay's HMAC signature verification instead |
+| 4 | `@csrf_exempt` was applied to an authenticated, non-webhook endpoint (`reservetournamentday`) with no equivalent protection in its place | Removed `csrf_exempt`; the endpoint now relies on Django's standard CSRF token flow. `payment_success` retains `csrf_exempt` intentionally, since it is protected by Razorpay's HMAC signature verification instead |
 
 ## Testing Strategy
 
