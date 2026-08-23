@@ -27,6 +27,7 @@ from .agent_state import get_agent_context, merge_agent_filters, normalize_requi
 import logging
 logger = logging.getLogger(__name__)
 from .redis_client import redis_client
+from decimal import Decimal
 
 AFFIRMATIVE_REPLIES = {
     "yes", "y", "confirm", "confirm booking", "confirm cancellation",
@@ -1200,7 +1201,7 @@ def tournamentcheckout(request, session_id):
     )
     if not reserved_days.exists():
         return redirect("tournamentBookingPage", pk=t_session.ground_id)
-    total_amount = 0
+    total_amount = Decimal("0")
     slot_ids = []
     for rd in reserved_days:
         shifts_used = (
@@ -1211,7 +1212,7 @@ def tournamentcheckout(request, session_id):
         for shift in shifts_used:
             price_field = PRICE_MAP.get(shift)
             if price_field:
-                total_amount += getattr(t_session.ground, price_field, 0) or 0
+                total_amount += Decimal(str(getattr(t_session.ground, price_field, 0) or 0))
         slot_ids.extend(
             rd.blocked_slots.values_list("id", flat=True)
         )
@@ -1267,7 +1268,7 @@ def create_tournament_razorpay_order(request, session_id):
             "redirect": "/bookings/grounds/",
             "message": "No reserved slots found"
         }, status=400)
-    total_amount = 0
+    total_amount = Decimal("0")
     slot_ids = []
     for rd in reserved_days:
         shifts_used = (
@@ -1278,7 +1279,7 @@ def create_tournament_razorpay_order(request, session_id):
         for shift in shifts_used:
             price_field = PRICE_MAP.get(shift)
             if price_field:
-                total_amount += getattr(t_session.ground, price_field, 0) or 0
+                total_amount += Decimal(str(getattr(t_session.ground, price_field, 0) or 0))
         slot_ids.extend(
             rd.blocked_slots.values_list("id", flat=True)
         )
@@ -1323,7 +1324,7 @@ def create_tournament_razorpay_order(request, session_id):
                         date=reservation.date,
                         slotsbooked_id=slot.id,
                         transaction_id=f"tournament_{pay.id}_{slot.id}",
-                        price=float(slot.price or 0),
+                        price=Decimal(str(slot.price or 0)),
                         payment_status=False,
                         booked=False,
                         Tournament_or_normal="tournament",
@@ -1583,7 +1584,7 @@ def checkoutpage(request, session_id):
         slots.objects.filter(id__in=slot_ids)
         .only("id", "price", "starttime", "endtime","is_blocked","is_booked")
     )
-    total = sum(float(slot.price or 0) for slot in slot_objs)
+    total = sum((Decimal(str(slot.price or 0)) for slot in slot_objs), Decimal("0"))
     return render(request, "bookings/checkoutpage.html", {
         "session": session,
         "slots": slot_objs,
@@ -1637,7 +1638,7 @@ def create_razorpay_order(request, session_id):
         slots.objects.filter(id__in=slot_ids)
         .only("id", "price", "starttime", "endtime")
     )
-    total = sum(float(slot.price or 0) for slot in slot_objs)
+    total = sum((Decimal(str(slot.price or 0)) for slot in slot_objs), Decimal("0"))
     existing_payment = (
         payment.objects.filter(
             session=session,
@@ -1681,7 +1682,7 @@ def create_razorpay_order(request, session_id):
                     normal_session=session,
                     slotsbooked_id=slot.id,
                     transaction_id=f"normal_{pay.id}_{slot.id}",
-                    price=float(slot.price or 0),
+                    price=Decimal(str(slot.price or 0)),
                     payment_status=False,
                     booked=False,
                     Tournament_or_normal="normal",
