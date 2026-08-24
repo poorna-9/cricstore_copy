@@ -137,21 +137,6 @@ def timingstoslots(timings, sporttype=None, groundorturf="turf", am_pm=None, shi
     return userslots
 
 
-def normalize_date_text(text):
-    text = text.lower().strip()
-    keywords = [
-        "this", "next", "coming", "upcoming", "current"
-    ]
-    weekdays = [
-        "monday", "tuesday", "wednesday",
-        "thursday", "friday", "saturday", "sunday"
-    ]
-    for k in keywords:
-        for d in weekdays:
-            text = text.replace(k + d, f"{k} {d}")
-    text = text.replace("thisweekend", "this weekend")
-    text = text.replace("nextweekend", "next weekend")
-    return text
 import re
 from datetime import datetime, timedelta, date
 def parse_natural_date(text):
@@ -416,7 +401,6 @@ def parse_natural_timings(timings, shift=None, am_or_pm=None):
         }.get(shift, (opening, closing))
     if timings:
         timings = normalize_timings_text(timings)
-        print("Normalized timings:", timings)
     if "-" in timings:
         start, end = timings.split("-")
         start, end = start.strip(), end.strip()
@@ -445,7 +429,6 @@ def parse_natural_timings(timings, shift=None, am_or_pm=None):
         return start_time, time(21, 0)
     if shift == "night":
         return start_time, closing
-    print("opening", opening, "closing", closing)
     return opening, closing
 
 globalcity = None
@@ -581,10 +564,6 @@ def grounddetail(request, pk):
     return render(request, 'bookings/groundpage.html', context)
 
 
-
-def decode_redis_ids(raw_ids):
-    return [int(s.decode() if isinstance(s, bytes) else s) for s in raw_ids]
-
 from django.db import transaction
 
 def cancel_normal_booking_session(session):
@@ -694,7 +673,6 @@ def tournamentBookingPage(request, pk):
 TOURNAMENT_SESSION_TTL_SECONDS = 15 * 60
 
 
-@csrf_exempt
 @db_retry(max_attempts=3)
 def reservetournamentday(request):
     logger.info(
@@ -932,7 +910,6 @@ SESSION_TTL_SECONDS = 10 * 60
 MAX_SLOTS_PER_SESSION = 6
 
 
-@csrf_exempt
 @db_retry(max_attempts=3)
 def reserveslot(request):
     logger.info(
@@ -1480,10 +1457,11 @@ from django.utils import timezone
 from .models import reservationsession, reservedslots, payment
 
 def cancel_booking(booking):
+    pay = None
     with transaction.atomic():
         booking = Bookings.objects.select_for_update().get(id=booking.id)
         if booking.is_cancelled:
-            return
+            return {"success": True, "refunded": False, "message": "Already cancelled"}
         slot_ids = list(booking.slotsbooked.values_list("id", flat=True))
         slot_objs = list(slots.objects.select_for_update().filter(id__in=slot_ids))
         for slot in slot_objs:
@@ -1495,28 +1473,37 @@ def cancel_booking(booking):
         booking.is_cancelled = True
         booking.save(update_fields=["booked", "is_cancelled"])
         if booking.normal_session:
+            pay = payment.objects.filter(
+                session=booking.normal_session, user=booking.user, status=True
+            ).order_by("-created_at").first()
             Orders.objects.filter(
-                normal_session=booking.normal_session,
-                user=booking.user,
-                booked=True,
-            ).update(
-                booked=False,
-                payment_status=False,
-            )
+                normal_session=booking.normal_session, user=booking.user, booked=True,
+            ).update(booked=False, payment_status=False)
         elif booking.tournament_session:
+            pay = payment.objects.filter(
+                tournament_session=booking.tournament_session, user=booking.user, status=True
+            ).order_by("-created_at").first()
             Orders.objects.filter(
-                tournament_session=booking.tournament_session,
-                user=booking.user,
-                booked=True,
-            ).update(
-                booked=False,
-                payment_status=False,
-            )
+                tournament_session=booking.tournament_session, user=booking.user, booked=True,
+            ).update(booked=False, payment_status=False)
+
+    refund_success, refund_message = False, "No captured payment found for this booking"
+    if pay and booking.payment_status:
+        refund_success, refund_message = process_refund_for_payment(pay, booking.price)
+        if refund_success:
+            booking.refund_amount = booking.price
+            booking.save(update_fields=["refund_amount"])
+
+    return {"success": True, "refunded": refund_success, "message": refund_message}
 
 @login_required
 def cancel_booking_view(request, booking_id):
     booking = get_object_or_404(Bookings, id=booking_id, user=request.user)
-    cancel_booking(booking)
+    result = cancel_booking(booking)
+    if result["refunded"]:
+        messages.success(request, f"Booking cancelled. Refund of ₹{booking.refund_amount} has been initiated via Razorpay.")
+    else:
+        messages.info(request, f"Booking cancelled. {result['message']}")
     return redirect("booking_detail", booking_id=booking.id)
 
 def my_bookings(request):
@@ -1543,6 +1530,7 @@ def payment_cancel_page(request):
 
 def decode_redis_ids(raw_ids):
     return [int(s.decode() if isinstance(s, bytes) else s) for s in raw_ids]
+
 
 
 razorpay_client = razorpay.Client(
@@ -2569,7 +2557,6 @@ def ask_user(context, backend_message, required_fields=None, extra=None, query="
             backend_message=backend_message
         )
     except Exception as e:
-        print("frame_chatbot_message failed:", e)
         final_message = backend_message
 
     response = {
@@ -2610,23 +2597,19 @@ def userquerychatbot(request):
             required_fields = []       
     if mode=="normal_booking":
       booking_type="normal_booking"
-      print("Required fields sent to backend:", required_fields)
       output = interpretgroundquery(query,booking_type,required_fields)
-      print("Chatbot Output:",output)
+      output = apply_deterministic_fallback(output, required_fields, query)
       if "chatcontext" not in request.session:
         request.session["chatcontext"] = {}
       context = request.session["chatcontext"]
-      print("previouscontext:", context)
       lasttimeraw=context.get("last_modified_at")
       lasttime = parse_datetime(lasttimeraw) if lasttimeraw else None
       if lasttime and timezone.now() > lasttime + timedelta(minutes=10):
-        print("Session cleared due to timeout.")
         request.session["chatcontext"] = {}
         context = request.session["chatcontext"]
       if output.get("intent")=="unknown" and "intent" in context:
           output["intent"]=context["intent"]
       raw_intent = (output.get("intent") or "").lower()
-      print("raw_intent:", raw_intent)
       INTENT_MAP = {
       "show": "show_ground",
       "find": "show_ground",
@@ -2649,14 +2632,12 @@ def userquerychatbot(request):
           normalized_intent = raw_intent
       else:
          normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
-      print("Normalized Intent:", normalized_intent)
       if normalized_intent == "general":
         context["city"] = globalcity
         return JsonResponse({"message": handle_general_query(query, globalcity)})
       for k,v in output.get("filters", {}).items():
         if v not in ("", None):
             context[k]=v
-      print("output context:",output)
       if normalized_intent != "unknown":
         context["intent"] = normalized_intent
       context['booking_type']=output.get('booking_type')
@@ -2671,7 +2652,6 @@ def userquerychatbot(request):
          }
       context["city"] = normalize_city(context.get("city"))
       request.session.modified = True
-      print("Updated Chatbot Context:",context)
       sport_type = (context.get("sporttype") or "").lower().strip()
       ground_or_turf = (context.get("ground_or_turf") or "").lower().strip()
       if not sport_type:
@@ -2710,10 +2690,8 @@ def userquerychatbot(request):
       request.session.modified = True
       if sport_type:
        grounds = Ground.objects.filter(sporttype__icontains=sport_type)
-       print("grounds by sport_type:", grounds)
       if ground_or_turf:
           grounds=grounds.filter(types__icontains=ground_or_turf)
-          print("grounds by ground_or_turf:", grounds)
       bookingtype= context.get("booking_type", "").lower().strip()
       if bookingtype=="normal_booking" and context.get("intent") == "show_ground":
         if not context.get("ground_or_turf_name"):
@@ -2733,7 +2711,6 @@ def userquerychatbot(request):
                 return JsonResponse({"message": "Please provide your location to find grounds near you.","html": html_page})      
             user_lat = float(request.session["user_lat"])
             user_lon = float(request.session["user_lon"])
-            print("Finding grounds near user at:", user_lat, user_lon)
             grounds = findgroundsnear(grounds,context.get("radius_km"), user_lat, user_lon)
             if isinstance(grounds, list):
                 ground_ids = [g.id for g in grounds]
@@ -2750,7 +2727,6 @@ def userquerychatbot(request):
                 return JsonResponse({"message": "Please provide your location to find grounds near you.","html": html_page})      
               user_lat = float(request.session["user_lat"])
               user_lon = float(request.session["user_lon"])
-              print("Finding grounds near user at:", user_lat, user_lon)
               grounds = findgroundsnear(grounds,context.get("radius_km"), user_lat, user_lon)
               if isinstance(grounds, list):
                 ground_ids = [g.id for g in grounds]
@@ -2765,12 +2741,9 @@ def userquerychatbot(request):
             )
          if context.get("city"):
             context["city"] = normalize_city(context.get("city"))
-            print("city used for filtering:", context["city"])
-            print("all DB cities:", list(Ground.objects.values_list("city", flat=True).distinct()))
             grounds = grounds.filter(build_city_query(context["city"]))
-            print("grounds by city:", grounds)
          if context.get("area"):
-            grounds = grounds.filter(address__icontains=context["area"])
+            grounds = fuzzy_address_filter(grounds, context["area"])
          if context.get("radius_km"):
             if not request.session.get("user_lat") or not request.session.get("user_lon"):
                 html_page=render_to_string("bookings/location-detection.html",request=request)
@@ -2833,13 +2806,11 @@ def userquerychatbot(request):
         if context.get("ground_or_turf_name"):
             if not context.get("area"):
                 return JsonResponse({'message': "Please tell me which area this ground is in","required_fields":["area"]})
-            ground = Ground.objects.filter(
-                name__icontains=context["ground_or_turf_name"],
-                city__icontains=context["city"],
-                address__icontains=context["area"]
+            ground = find_grounds_fuzzy(
+                name=context["ground_or_turf_name"], city=context["city"], area=context["area"]
             )
             if len(ground) == 0:
-                grounds=Ground.objects.filter(address__icontains=context["area"])
+                grounds = fuzzy_address_filter(Ground.objects.filter(build_city_query(context["city"])), context["area"])
                 cities= Ground.objects.values_list('city', flat=True).distinct()
                 html_page= render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
                 return ask_user(
@@ -2904,9 +2875,7 @@ def userquerychatbot(request):
                 ["date"]
             )
         date_str = context["date"]
-        print("Parsing date from user input:", date_str)
         parsed_date = parse_natural_date(date_str)
-        print("Parsed date:", parsed_date)
         if not parsed_date:
             message = f"I couldn’t understand the date '{date_str}'. Please specify a date like '28 Jan', 'tomorrow', or '2026-01-28'."
             return ask_user(
@@ -2925,14 +2894,11 @@ def userquerychatbot(request):
                     f"ask the user for the {field.replace('_', ' ')}.",
                     [field]
                 )
-        ground = Ground.objects.filter(
-            name__icontains=context["ground_or_turf_name"],
-            city__icontains=context["city"],
-            address__icontains=context["area"]
+        ground = find_grounds_fuzzy(
+            name=context["ground_or_turf_name"], city=context["city"], area=context["area"]
         )
         if ground.count() == 1:
             ground = ground.first()
-            print(ground)
         elif ground.count() > 1:
            cities = Ground.objects.values_list('city', flat=True).distinct()
            html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": ground, "cities": cities, "selected_city":""},request=request)
@@ -2943,7 +2909,7 @@ def userquerychatbot(request):
            )
         else:
             cities = Ground.objects.values_list('city', flat=True).distinct()
-            grounds=Ground.objects.filter(address__icontains=context["area"])
+            grounds = fuzzy_address_filter(Ground.objects.filter(build_city_query(context["city"])), context["area"])
             html_page=render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
             return ask_user(
                 context,
@@ -3001,7 +2967,6 @@ def userquerychatbot(request):
             userneedstoplay = hrs
         else:
             userneedstoplay=len(userslots)
-        print("User Slots:", userslots)
         output_res = chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
         if not isinstance(output_res,dict):
             return JsonResponse({'message': 'Error reserving slots. Please try again.'})
@@ -3060,10 +3025,14 @@ def userquerychatbot(request):
                 return ask_user({}, "This booking is already cancelled.")
             if booking.date < timezone.now().date():
                 return ask_user({}, "You can't cancel this booking anymore.")
-            cancel_booking(booking)
+            result=cancel_booking(booking)
+            if result["refunded"]:
+                return JsonResponse({
+                    "message": f"Your booking is cancelled successfully. Refund of ₹{booking.refund_amount} has been initiated via Razorpay."
+                })
             return JsonResponse({
-                "message": f"Your booking is cancelled successfully. Refund of ₹{booking.price} is initiated."
-            }) 
+                "message": f"Your booking is cancelled. {result['message']}"
+            })
     if mode == "reschedule":
       return JsonResponse({ "message": f"will add it soon"})
     #############################################################################################################################################   
@@ -3083,23 +3052,19 @@ def userquerychatbot(request):
         else:
             required_fields = []
       booking_type="tournament_booking"
-      print("Required fields sent to backend:", required_fields)
       output = interpretgroundquery(query,booking_type,required_fields)  
-      print("Chatbot Output:",output)
+      output = apply_deterministic_fallback(output, required_fields, query)
       if "chatcontext" not in request.session:
         request.session["chatcontext"] = {}
       context = request.session["chatcontext"]
-      print("previouscontext:", context)
       lasttimeraw=context.get("last_modified_at")
       lasttime = parse_datetime(lasttimeraw) if lasttimeraw else None
       if lasttime and timezone.now() > lasttime + timedelta(minutes=10):
-        print("Session cleared due to timeout.")
         request.session["chatcontext"] = {}
         context = request.session["chatcontext"]
       if output.get("intent")=="unknown" and "intent" in context:
           output["intent"]=context["intent"]
       raw_intent = (output.get("intent") or "").lower()
-      print("raw_intent:", raw_intent)
       INTENT_MAP = {
       "show": "show_ground",
       "find": "show_ground",
@@ -3131,13 +3096,11 @@ def userquerychatbot(request):
            continue
         if v not in ("", None):
             context[k]=v
-      print("output context:",output)
       if normalized_intent != "unknown":
         context["intent"] = normalized_intent
       context['booking_type']=output.get('booking_type')
       context["last_modified_at"]=timezone.now().isoformat()
       request.session.modified = True
-      print("Updated Chatbot Context:",context)
       sport_type = (context.get("sporttype") or "").lower().strip()
       ground_or_turf = (context.get("ground_or_turf") or "").lower().strip()
       if not sport_type:
@@ -3180,10 +3143,8 @@ def userquerychatbot(request):
       request.session.modified = True
       if sport_type:
        grounds = Ground.objects.filter(sporttype__icontains=sport_type)
-       print("grounds by sport_type:", grounds)
       if ground_or_turf:
           grounds=grounds.filter(types__icontains=ground_or_turf)
-          print("grounds by ground_or_turf:", grounds)
       bookingtype= context.get("booking_type", "").lower().strip()
       if booking_type=="tournament_booking" and context.get("intent") == "show_ground":   
         if not context.get("ground_or_turf_name"):
@@ -3204,12 +3165,9 @@ def userquerychatbot(request):
             return JsonResponse({"message":"these are the grounds near to you","html": html_page})
           if context.get("city"):
                context["city"] = normalize_city(context.get("city"))
-               print("city used for filtering:", context["city"])
-               print("all DB cities:", list(Ground.objects.values_list("city", flat=True).distinct()))
                grounds = grounds.filter(build_city_query(context["city"]))
-               print("grounds by city:", grounds)
           if context.get("area"):
-               grounds = grounds.filter(address__icontains=context["area"])
+               grounds = fuzzy_address_filter(grounds, context["area"])
           if context.get("rating_min"):
               grounds=grounds.filter(rating__gte=float(context["rating_min"]-2))
           if context.get("rating_semantic"):
@@ -3219,14 +3177,12 @@ def userquerychatbot(request):
                   grounds=grounds.filter(rating__lte=3)
           if context.get("start"):
              dicti = parse_date_constraints(context["start"],context.get("end"),context.get("total_days"))
-             print("Parsed date constraints:", dicti)
              if not dicti["success"]:
                return JsonResponse({"message": dicti["message"]})
              start,end=dicti["start"],dicti["end"]
              shiftsperday=shifts(context["shifts"],start,end)
              context["start"]=start.isoformat()
              context["end"]=end.isoformat()
-             print("Start:", start, "End:", end, "Shifts per day:", shiftsperday)
           if not context.get("budget"):
                 grounds=showavailability(grounds,start,end,shiftsperday)
                 if isinstance(grounds, list):
@@ -3268,9 +3224,9 @@ def userquerychatbot(request):
                         )
                     if result["success"]:
                            valid_grounds.append(g)
+                cities = Ground.objects.values_list('city', flat=True).distinct() 
                 if not valid_grounds:
-                    grs=Ground.objects.filter(city=context["city"])
-                    cities= Ground.objects.values_list('city', flat=True).distinct()
+                    fallback = Ground.objects.filter(build_city_query(context["city"]))
                     html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
                     return ask_user(
                         context,
@@ -3287,11 +3243,9 @@ def userquerychatbot(request):
         if context.get("ground_or_turf_name"):
             if not context.get("area") or not context.get("city"):
                 return JsonResponse({"message":"please provide city and area of the ground you are looking","required_fields":["area","city"]})
-            grounds = Ground.objects.filter(
-              name__icontains=context.get("ground_or_turf_name")
-             )
-            grounds = grounds.filter(city=context["city"])
-            grounds = grounds.filter(address__icontains=context["area"])
+            grounds = find_grounds_fuzzy(
+                name=context.get("ground_or_turf_name"), city=context["city"], area=context["area"]
+            )
             cities = Ground.objects.values_list('city', flat=True).distinct()
             if not grounds.exists():
                 fallback = Ground.objects.all()
@@ -3449,20 +3403,29 @@ def userquerychatbot(request):
                 "Please provide the city of the ground you are looking for.",
                 ["city"]
             )
-        ground = Ground.objects.filter(
-            name__icontains=context["ground_or_turf_name"],
-            city__icontains=context["city"],
-            address__icontains=context["area"]
-        ).first()
-        if not ground:
-            grounds=Ground.objects.filter(address__icontains=context["area"])
-            cities= Ground.objects.values_list('city', flat=True).distinct()
-            html_page= render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-            return ask_user(
-                context,
-                "I found multiple grounds in that area. Please select one from the list below.",
-                html=html_page
-            )
+        matches = find_grounds_fuzzy(
+            name=context["ground_or_turf_name"], city=context["city"], area=context["area"]
+        )
+        match_count = matches.count()
+        if match_count == 1:
+            ground = matches.first()
+        else:
+            cities = Ground.objects.values_list('city', flat=True).distinct()
+            if match_count == 0:
+                fallback = Ground.objects.filter(build_city_query(context["city"]))
+                html_page = render_to_string("partials/partialcheckpage.html",{"grounds": fallback, "cities": cities, "selected_city":""},request=request)
+                return ask_user(
+                    context,
+                    f"I couldn't find '{context['ground_or_turf_name']}' near '{context['area']}'. Here are grounds in {context['city']} instead.",
+                    html=html_page
+                )
+            else:
+                html_page = render_to_string("partials/partialcheckpage.html",{"grounds": matches, "cities": cities, "selected_city":""},request=request)
+                return ask_user(
+                    context,
+                    "I found multiple grounds matching that. Please select one from the list below.",
+                    html=html_page
+                )
         if not context.get("start"):
               return ask_user(
                   context,
@@ -3477,7 +3440,7 @@ def userquerychatbot(request):
                 ["start"]
             )
         start, end = dicti["start"], dicti["end"]
-        shiftsperday = shifts(context["shifts"], start,end)
+        shiftsperday =  shifts(context.get("shifts"), start, end)
         context["start"]=start.isoformat()
         context["end"]=end.isoformat()
         tournament_summary = (
@@ -3488,12 +3451,9 @@ def userquerychatbot(request):
             tournament_summary += f" Budget: {context['budget']}."
         if not context.get("budget"):
             dicti_no_budget=checkwithoutbudget(ground,start,end,shiftsperday)
-            print("Check without budget result:", dicti_no_budget)
             if dicti_no_budget["success"]:
                 plan=build_plan_from_shifts(shiftsperday)
-                print(plan)
                 success,session_id=booktournament(request.user,ground,plan)
-                print("Booking result:", success, session_id)
                 if not success:
                     return ask_user(
                         context,
@@ -3843,3 +3803,82 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
     except Exception as e:
         logger.exception("chatbot_reserve_slots failed: %s", e)
         return {'success': False, 'message': str(e)}
+
+
+def process_refund_for_payment(pay, amount_to_refund, notes=None):
+    if not pay or not pay.razorpay_payment_id:
+        return False, "No captured payment found to refund"
+    if pay.refund_status == "processed":
+        return True, pay.razorpay_refund_id
+    try:
+        refund = razorpay_client.payment.refund(
+            pay.razorpay_payment_id,
+            {
+                "amount": int(Decimal(str(amount_to_refund)) * 100),
+                "speed": "normal",
+                "notes": notes or {},
+            }
+        )
+        pay.razorpay_refund_id = refund.get("id")
+        pay.refund_status = "processed"
+        pay.refunded_amount = amount_to_refund
+        pay.save(update_fields=["razorpay_refund_id", "refund_status", "refunded_amount"])
+        return True, refund.get("id")
+    except Exception as e:
+        logger.exception("Razorpay refund failed for payment %s", pay.id)
+        pay.refund_status = "failed"
+        pay.save(update_fields=["refund_status"])
+        return False, str(e)
+
+from difflib import get_close_matches
+import re as _re
+
+def find_grounds_fuzzy(name=None, city=None, area=None):
+    qs = Ground.objects.all()
+    if name:
+        qs = qs.filter(name__icontains=name)
+    if city:
+        qs = qs.filter(build_city_query(city))
+    if not area:
+        return qs
+    exact = qs.filter(address__icontains=area)
+    if exact.exists():
+        return exact
+    area_words = _re.findall(r'\w+', area.lower())
+    matched_ids = []
+    for g in qs:
+        addr_words = _re.findall(r'\w+', g.address.lower())
+        if any(get_close_matches(w, addr_words, n=1, cutoff=0.75) for w in area_words):
+            matched_ids.append(g.id)
+    return qs.filter(id__in=matched_ids)
+
+def fuzzy_address_filter(queryset, area):
+    if not area:
+        return queryset
+    exact = queryset.filter(address__icontains=area)
+    if exact.exists():
+        return exact
+    area_words = _re.findall(r'\w+', area.lower())
+    matched_ids = []
+    for g in queryset:
+        addr_words = _re.findall(r'\w+', g.address.lower())
+        if any(get_close_matches(w, addr_words, n=1, cutoff=0.75) for w in area_words):
+            matched_ids.append(g.id)
+    return queryset.filter(id__in=matched_ids)
+
+NUMERIC_FIELD_PARSERS = {
+    "hours": parsehours,
+    "total_matches": lambda t: (lambda m: int(m.group()) if m else None)(_re.search(r'\d+', t)),
+    "overs_per_match": lambda t: (lambda m: int(m.group()) if m else None)(_re.search(r'\d+', t)),
+    "budget": lambda t: (lambda m: int(m.group().replace(',', '')) if m else None)(_re.search(r'[\d,]+', t)),
+}
+
+def apply_deterministic_fallback(output, required_fields, query):
+    if len(required_fields) == 1:
+        field = required_fields[0]
+        parser = NUMERIC_FIELD_PARSERS.get(field)
+        if parser and not output.get("filters", {}).get(field):
+            parsed = parser(query)
+            if parsed is not None:
+                output.setdefault("filters", {})[field] = str(parsed)
+    return output

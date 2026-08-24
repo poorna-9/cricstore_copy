@@ -365,10 +365,6 @@ def interpretgroundquery(user_query, booking_type, required_fields):
     try:
         if booking_type == "normal_booking":
             if route == "missing_fields":
-                print("Route chain input:", {
-                "required_fields": ", ".join(required_fields),
-                "query": user_query
-                })
                 output = missing_chain.invoke({
                     "required_fields": ", ".join(required_fields),
                     "query": user_query
@@ -399,10 +395,6 @@ def interpretgroundquery(user_query, booking_type, required_fields):
             return data
         elif booking_type == "tournament_booking":
             if route == "missing_fields":
-                print("Tournament Route chain input:", {
-                "required_fields": ", ".join(required_fields),
-                "query": user_query
-                })
                 output = tournament_missing_chain.invoke({
                     "required_fields": ", ".join(required_fields),
                     "query": user_query
@@ -480,7 +472,6 @@ def frame_chatbot_message(query, context, backend_message):
         return result.message
 
     except Exception as e:
-        print("Chatbot ask LLM failed:", e)
         return backend_message
     
 

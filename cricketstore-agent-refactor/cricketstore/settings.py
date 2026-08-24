@@ -11,17 +11,12 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 from pathlib import Path
 import os
-import stripe
 import redis
 from celery.schedules import crontab
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_SECRET_KEY = os.getenv("RAZORPAY_SECRET_KEY")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
-stripe.api_key = STRIPE_SECRET_KEY
 SECRET_KEY = os.environ.get(
     'SECRET_KEY',
     'django-insecure-7*0pi$jx-$__x#w8m+t78b8ejxs7#zjm-9f_4#x6zdj)1t4xqx'

@@ -232,3 +232,15 @@ class payment(models.Model):
     amount = models.FloatField()
     status = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    razorpay_refund_id = models.CharField(max_length=100, null=True, blank=True)
+    refund_status = models.CharField(
+        max_length=20,
+        choices=[
+            ("none", "None"),
+            ("pending", "Pending"),
+            ("processed", "Processed"),
+            ("failed", "Failed"),
+        ],
+        default="none"
+    )
+    refunded_amount = models.FloatField(default=0.0)
