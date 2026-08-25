@@ -1,0 +1,111 @@
+<div class="tournament-schedule">
+
+    <h3>Tournament Schedule</h3>
+
+    <!-- Tournament Summary -->
+    <div class="tournament-summary">
+
+        <p>
+            <strong>Ground:</strong>
+            {{ ground.name }}
+        </p>
+
+        <p>
+            <strong>Total Matches:</strong>
+            {{ total_matches }}
+        </p>
+
+        <p>
+            <strong>Overs per Match:</strong>
+            {{ overs_per_match }}
+        </p>
+
+        <p>
+            <strong>Total Cost:</strong>
+            ₹{{ total_cost }}
+        </p>
+
+    </div>
+
+    <hr>
+
+    <h4>Schedule</h4>
+
+    {% for day in schedule_details.days %}
+
+        <div class="schedule-day">
+
+            <h5>
+                {{ day.date }}
+            </h5>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Shift</th>
+                        <th>Matches</th>
+                        <th>Price</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for shift in day.shifts %}
+
+                        <tr>
+                            <td>
+                                {{ shift.shift }}
+                            </td>
+
+                            <td>
+                                {{ shift.matches }}
+                            </td>
+
+                            <td>
+                                ₹{{ shift.price }}
+                            </td>
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+            </table>
+
+            <p>
+                <strong>Matches on this day:</strong>
+                {{ day.day_matches }}
+            </p>
+
+            <p>
+                <strong>Cost for this day:</strong>
+                ₹{{ day.day_cost }}
+            </p>
+
+        </div>
+
+        <hr>
+
+    {% empty %}
+
+        <p>No schedule available.</p>
+
+    {% endfor %}
+
+    <!-- Final Summary -->
+    <div class="schedule-total">
+
+        <h4>Booking Summary</h4>
+
+        <p>
+            <strong>Total Matches:</strong>
+            {{ schedule_details.total_matches }}
+        </p>
+
+        <p>
+            <strong>Total Cost:</strong>
+            ₹{{ schedule_details.total_cost }}
+        </p>
+
+    </div>
+
+</div>

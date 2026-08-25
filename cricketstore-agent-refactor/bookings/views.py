@@ -2290,6 +2290,7 @@ def check(ground, start, end, shiftperday, budget, matches, overs, show=False):
         remaining_days = len(dates) - index
         if currmatches + remaining_days * max_matches_per_day < matches:
             return (False, None) if show else (float("inf"), None)
+    
         current_date = dates[index]
         allowed_mask = avail_mask_per_day[current_date]
         user_mask = 0
@@ -2568,6 +2569,27 @@ def ask_user(context, backend_message, required_fields=None, extra=None, query="
     response.update(extra)
     return JsonResponse(response)
 
+def get_or_reset_context(request, mode, timeout_minutes=10):
+    if "chatcontext" not in request.session:
+        request.session["chatcontext"] = {}
+    context = request.session["chatcontext"]
+
+    if context and context.get("mode") != mode:
+        request.session["chatcontext"] = {}
+        context = request.session["chatcontext"]
+
+    lasttimeraw = context.get("last_modified_at")
+    lasttime = parse_datetime(lasttimeraw) if lasttimeraw else None
+    if lasttime and timezone.now() > lasttime + timedelta(minutes=timeout_minutes):
+        request.session["chatcontext"] = {}
+        context = request.session["chatcontext"]
+
+    context["mode"] = mode
+    request.session.modified = True
+    return context
+
+
+
 def userquerychatbot(request):
     if request.method == "POST":
         try:
@@ -2599,17 +2621,11 @@ def userquerychatbot(request):
       booking_type="normal_booking"
       output = interpretgroundquery(query,booking_type,required_fields)
       output = apply_deterministic_fallback(output, required_fields, query)
-      if "chatcontext" not in request.session:
-        request.session["chatcontext"] = {}
-      context = request.session["chatcontext"]
-      lasttimeraw=context.get("last_modified_at")
-      lasttime = parse_datetime(lasttimeraw) if lasttimeraw else None
-      if lasttime and timezone.now() > lasttime + timedelta(minutes=10):
-        request.session["chatcontext"] = {}
-        context = request.session["chatcontext"]
+      context = get_or_reset_context(request, mode)
       if output.get("intent")=="unknown" and "intent" in context:
           output["intent"]=context["intent"]
       raw_intent = (output.get("intent") or "").lower()
+      context["mode"]=mode
       INTENT_MAP = {
       "show": "show_ground",
       "find": "show_ground",
@@ -2634,7 +2650,7 @@ def userquerychatbot(request):
          normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
       if normalized_intent == "general":
         context["city"] = globalcity
-        return JsonResponse({"message": handle_general_query(query, globalcity)})
+        return JsonResponse({"message": handle_general_query(query, globalcity)})   
       for k,v in output.get("filters", {}).items():
         if v not in ("", None):
             context[k]=v
@@ -3054,14 +3070,7 @@ def userquerychatbot(request):
       booking_type="tournament_booking"
       output = interpretgroundquery(query,booking_type,required_fields)  
       output = apply_deterministic_fallback(output, required_fields, query)
-      if "chatcontext" not in request.session:
-        request.session["chatcontext"] = {}
-      context = request.session["chatcontext"]
-      lasttimeraw=context.get("last_modified_at")
-      lasttime = parse_datetime(lasttimeraw) if lasttimeraw else None
-      if lasttime and timezone.now() > lasttime + timedelta(minutes=10):
-        request.session["chatcontext"] = {}
-        context = request.session["chatcontext"]
+      context = get_or_reset_context(request, mode)
       if output.get("intent")=="unknown" and "intent" in context:
           output["intent"]=context["intent"]
       raw_intent = (output.get("intent") or "").lower()
@@ -3087,6 +3096,9 @@ def userquerychatbot(request):
           normalized_intent = raw_intent
       else:
          normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
+      if normalized_intent == "general":
+              context["city"] = globalcity
+              return JsonResponse({"message": handle_general_query(query, globalcity)})
       if context.get("city"):
         context["city"] = normalize_city(context.get("city"))
       for k,v in output.get("filters", {}).items():
@@ -3180,7 +3192,7 @@ def userquerychatbot(request):
              if not dicti["success"]:
                return JsonResponse({"message": dicti["message"]})
              start,end=dicti["start"],dicti["end"]
-             shiftsperday=shifts(context["shifts"],start,end)
+             shiftsperday=shifts(context.get("shifts"),start,end)
              context["start"]=start.isoformat()
              context["end"]=end.isoformat()
           if not context.get("budget"):
@@ -3355,7 +3367,7 @@ def userquerychatbot(request):
                         grounds=Ground.objects.filter(city=context["city"])
                         valid_grounds=[]
                         for g in grounds:
-                            result=check(ground=g,
+                            result=check(ground=ground,
                                  start=context["start"],
                                  end=context["end"],
                                  shiftperday=shiftsperday,
@@ -3363,7 +3375,7 @@ def userquerychatbot(request):
                                  matches=int(context["total_matches"]) ,
                                  overs=int(context["overs_per_match"]),
                                  show=True
-                            )
+                        )
                             if result["success"]:
                               valid_grounds.append(g)
                         if not valid_grounds:
@@ -3407,10 +3419,10 @@ def userquerychatbot(request):
             name=context["ground_or_turf_name"], city=context["city"], area=context["area"]
         )
         match_count = matches.count()
+        cities = Ground.objects.values_list('city', flat=True).distinct()
         if match_count == 1:
             ground = matches.first()
         else:
-            cities = Ground.objects.values_list('city', flat=True).distinct()
             if match_count == 0:
                 fallback = Ground.objects.filter(build_city_query(context["city"]))
                 html_page = render_to_string("partials/partialcheckpage.html",{"grounds": fallback, "cities": cities, "selected_city":""},request=request)
@@ -3432,7 +3444,7 @@ def userquerychatbot(request):
                   "Please provide the start date of your tournament.",
                   ["start"]
               )
-        dicti = parse_date_constraints(context["start"],context.get("end"),context.get("total_days"))
+        dicti = parse_date_constraints(context.get("start"),context.get("end"),context.get("total_days"))
         if not dicti["success"]:
             return ask_user(
                 context,
@@ -3450,28 +3462,59 @@ def userquerychatbot(request):
         if context.get("budget"):
             tournament_summary += f" Budget: {context['budget']}."
         if not context.get("budget"):
-            dicti_no_budget=checkwithoutbudget(ground,start,end,shiftsperday)
-            if dicti_no_budget["success"]:
-                plan=build_plan_from_shifts(shiftsperday)
-                success,session_id=booktournament(request.user,ground,plan)
-                if not success:
+            if context.get("total_matches") and context.get("overs_per_match"):
+                UNLIMITED_BUDGET = 10**9
+                capacity_check = check(
+                    ground=ground,
+                    start=start,
+                    end=end,
+                    shiftperday=shiftsperday,
+                    budget=UNLIMITED_BUDGET,
+                    matches=int(context["total_matches"]),
+                    overs=int(context["overs_per_match"]),
+                    show=False
+                )
+                if capacity_check.get("success") and capacity_check.get("schedule"):
+                    schedule=capacity_check.get("schedule")
+                    total_cost=capacity_check.get("total_cost")
+                    schedule_details = get_schedule_details(
+                        ground,
+                        schedule,
+                        int(context["overs_per_match"])
+                    )
+                    print("SCHEDULE DETAILS:", schedule_details)
                     return ask_user(
                         context,
-                        "cannot book someone else booked some shifts",
-                        ["ground_or_turf_name"]
+                        "I found the cheapest available schedule for your tournament.",
+                        html=render_to_string(
+                            "partials/tournament_schedule.html",
+                            {
+                                "ground": ground,
+                                "schedule_details": schedule_details,
+                                "total_matches": context["total_matches"],
+                                "overs_per_match": context["overs_per_match"],
+                                "total_cost": total_cost
+                            },request
+                        )
                     )
                 else:
-                    context["stage"] = "awaiting_payment"
-                    return JsonResponse({"message": "Tournament slots reserved. Please complete payment within 15 minutes.","redirect_url": reverse("tournamentcheckout", args=[session_id])})
+                    fallback = Ground.objects.filter(build_city_query(context["city"]))
+                    matches_n = context.get("total_matches")
+                    overs_n = context.get("overs_per_match")
+                    html_page = render_to_string("partials/partialcheckpage.html",{"grounds": fallback, "cities": cities, "selected_city":""},request=request)
+                    return ask_user(
+                        context,
+                        f"I couldn't find a way for '{context['ground_or_turf_name']}' to host a tournament "
+                        f"with {matches_n} matches of {overs_n} overs each in these dates.",
+                        html=html_page )
             else:
-                grounds=Ground.objects.filter(city=context["city"])
-                cities= Ground.objects.values_list('city', flat=True).distinct()
-                html_page = render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
                 return ask_user(
                     context,
-                    "these are the grounds near to you",
-                    html=html_page
+                    "Please provide the total number of matches and overs per match so I can check availability.",
+                    ["total_matches", "overs_per_match"]
                 )
+                
+
         if context.get("budget"):
             if not context.get("total_matches"):
                 return ask_user(
@@ -3486,20 +3529,20 @@ def userquerychatbot(request):
                     ["overs_per_match"]
                 )
             dicti=check(ground=ground,
-                        start=context["start"],
-                        end=context["end"],
+                        start=start,
+                        end=end,
                         shiftperday=shiftsperday,
-                        budget=context["budget"],
-                        matches=context["total_matches"] ,
-                        overs=context["overs_per_match"],
+                        budget=int(context["budget"]),
+                        matches=int(context["total_matches"]) ,
+                        overs=int(context["overs_per_match"]),
                         show=False)
             if not dicti.get("success"):
                 grounds=Ground.objects.filter(city=context["city"])
                 valid_grounds=[]
                 for g in grounds:
                             result=check(ground=g,
-                                 start=context["start"],
-                                 end=context["end"],
+                                 start=start,
+                                 end=end,
                                  shiftperday=shiftsperday,
                                  budget=context["budget"],
                                  matches=context["total_matches"] ,
@@ -3882,3 +3925,71 @@ def apply_deterministic_fallback(output, required_fields, query):
             if parsed is not None:
                 output.setdefault("filters", {})[field] = str(parsed)
     return output
+
+def build_plan_from_schedule(schedule):
+    plan = {}
+    for date, shift_list in schedule:
+        plan.setdefault(date, [])
+        for s in shift_list:
+            if s not in plan[date]:
+                plan[date].append(s)
+    return plan
+
+def get_schedule_details(ground, schedule, overs):
+    timepermatch = calculatematchtimings(overs)
+
+    matches_per_shift = {
+        shift: (
+            SHIFT_DURATION_MINUTES[shift] // timepermatch
+            if SHIFT_DURATION_MINUTES[shift] >= timepermatch
+            else 0
+        )
+        for shift in SHIFT_LIST
+    }
+
+    details = []
+
+    total_matches = 0
+    total_cost = 0
+
+    for date, shifts in schedule:
+
+        day_cost = 0
+        day_matches = 0
+
+        shift_details = []
+
+        for shift in shifts:
+
+            price = getattr(
+                ground,
+                f"t_{shift}_price",
+                0
+            )
+
+            shift_matches = matches_per_shift[shift]
+
+            day_cost += price
+            day_matches += shift_matches
+
+            shift_details.append({
+                "shift": shift,
+                "matches": shift_matches,
+                "price": price
+            })
+
+        total_cost += day_cost
+        total_matches += day_matches
+
+        details.append({
+            "date": date,
+            "shifts": shift_details,
+            "day_matches": day_matches,
+            "day_cost": day_cost
+        })
+
+    return {
+        "days": details,
+        "total_matches": total_matches,
+        "total_cost": total_cost
+    }
