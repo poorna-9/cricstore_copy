@@ -22,12 +22,24 @@
 }
 
 .booking-summary li {
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid #eee;
 }
 
-.booking-summary li ul {
-  padding-left: 18px;
+.reserved-day {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 16px;
+}
+
+.reserved-date {
+  font-weight: 600;
+}
+
+.reserved-shift {
+  font-weight: 500;
+  text-transform: capitalize;
 }
 
 .pay-btn {
@@ -74,27 +86,23 @@
 
     <div class="booking-summary">
 
-      <h3>Reserved Days & Slots</h3>
+      <h3>Reserved Days & Shifts</h3>
 
       <ul>
         {% for day in reserved %}
-          <li>
-            <strong>{{ day.date }}</strong>
+            <li class="reserved-day">
 
-            <ul>
-              {% for slot in day.blocked_slots.all %}
-                <li>
-                  {{ slot.starttime|time:"h:i A" }} -
-                  {{ slot.endtime|time:"h:i A" }}
-                  ({{ slot.shift }})
-                </li>
-              {% endfor %}
-            </ul>
+            <span class="reserved-date">
+                {{ day.date|date:"M. j, Y" }}
+            </span>
 
-          </li>
+            <span class="reserved-shift">
+                {{ day.shift|title }}
+            </span>
+
+            </li>
         {% endfor %}
-      </ul>
-
+        </ul>
       <p>
         <strong>Ground:</strong>
         {{ ground.name }}
@@ -106,13 +114,15 @@
       </p>
 
       {% if remaining_seconds %}
-      <p>
-        <strong>Complete payment in:</strong>
-        <span id="checkout-timer"
-              data-seconds="{{ remaining_seconds }}">
-          {{ remaining_seconds }}
-        </span>
-      </p>
+        <p>
+          <strong>Complete payment in:</strong>
+          <span
+            id="checkout-timer"
+            data-seconds="{{ remaining_seconds }}"
+          >
+            {{ remaining_seconds }}
+          </span>
+        </p>
       {% endif %}
 
     </div>
@@ -278,16 +288,21 @@ payBtn.addEventListener("click", async function(e) {
     }
 });
 
+
 const timerEl = document.getElementById("checkout-timer");
 
 if (timerEl) {
 
-    let seconds = Number(timerEl.dataset.seconds || 0);
+    let seconds =
+        Number(timerEl.dataset.seconds || 0);
 
     function renderTimer() {
 
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
+        const mins =
+            Math.floor(seconds / 60);
+
+        const secs =
+            seconds % 60;
 
         timerEl.textContent =
             String(mins).padStart(2, "0")

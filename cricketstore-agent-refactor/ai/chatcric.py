@@ -66,13 +66,55 @@ INTENT RULES:
 
 TIME & DATE RULES:
 - Extract raw date text exactly (e.g. "tomorrow", "this saturday")
-- Extract timing text exactly (e.g. "5 to 7", "evening")
+- Extract timing text exactly (e.g. "5 to 7", "3 to 6")
 - Detect shifts: morning / afternoon / evening / night
 - Detect AM / PM if clearly mentioned
-- Detect constraint words:
-    - "from", "after", "starting" → constraint_type = "after"
-    - "until", "before" → constraint_type = "before"
-    - ranges → constraint_type = "between"
+
+CONSTRAINT TYPE RULES — FOLLOW THIS PRIORITY:
+
+1. EXPLICIT TIME RANGE:
+   If the user gives BOTH a start time AND an end time,
+   constraint_type MUST be "between".
+
+   Examples:
+   - "3 to 6" → timings = "3 to 6", constraint_type = "between"
+   - "3 PM to 6 PM" → timings = "3 PM to 6 PM", constraint_type = "between"
+   - "from 3 to 6" → timings = "3 to 6", constraint_type = "between"
+   - "from 3 PM to 6 PM" → timings = "3 PM to 6 PM", constraint_type = "between"
+   - "5-7 evening" → timings = "5-7", constraint_type = "between"
+
+   IMPORTANT:
+   The word "from" does NOT mean "after" when an end time is also
+   provided. "from 3 to 6" is a complete time range and MUST be
+   classified as "between".
+
+2. AFTER / STARTING:
+   Use constraint_type = "after" ONLY when the user provides
+   a starting time WITHOUT an ending time.
+
+   Examples:
+   - "from 3 PM" → constraint_type = "after"
+   - "starting at 5 PM" → constraint_type = "after"
+   - "after 6 PM" → constraint_type = "after"
+
+3. BEFORE / UNTIL:
+   Use constraint_type = "before" when the user provides
+   an ending time WITHOUT a starting time.
+
+   Examples:
+   - "until 6 PM" → constraint_type = "before"
+   - "before 8 PM" → constraint_type = "before"
+
+4. SHIFT ONLY:
+   If the user only mentions a shift:
+   - "evening" → shift = "evening"
+   - "evening slots" → shift = "evening"
+
+   Do NOT invent timings or constraint_type.
+
+PRIORITY RULE:
+An explicit start-to-end time range ALWAYS takes priority over
+words such as "from", "starting", "after", "until", or "before".
 
 PRICE RULES:
 - "cheap", "cheapest", "low price" → price_semantic = "cheaper"
@@ -81,9 +123,11 @@ PRICE RULES:
 RATING RULES:
 - "top rated", "best" → rating_semantic = "top_rated"
 - "low rated" → rating_semantic = "low_rated"
+
 ALL extracted values MUST go inside "filters".
+
 LOCATION RULES:
--If user says "near me", "nearby", "around me", "close to me":
+- If user says "near me", "nearby", "around me", "close to me":
   → set nearme = true
 - Do NOT set radius_km unless explicitly mentioned
 
@@ -305,7 +349,7 @@ Rules:
     - route → "missing_fields" OR "full_parse"
     - confidence → a float between 0 and 1 (optional, default 1.0)
 - If reply only contains values for missing fields → route = "missing_fields"
-- If reply introduces booking intent, ground name, or new action → route = "full_parse"
+- If reply introduces booking intent, new action → route = "full_parse"
 - Output STRICT JSON ONLY.
 """),
     ("human", """
@@ -379,6 +423,12 @@ def interpretgroundquery(user_query, booking_type, required_fields):
                 data["booking_type"] = booking_type
                 data["filters"]["nearme"] = "true" if "near me" in user_query.lower() else "false"
             user_lower = user_query.lower()
+            timings = data["filters"].get("timings", "")
+            if timings:
+                timings_lower = timings.lower().strip()
+
+                if " to " in timings_lower or "-" in timings_lower:
+                    data["filters"]["constraint_type"] = "between"
             if not data["filters"]["ground_or_turf"]:
                 if "ground" in user_lower:
                     data["filters"]["ground_or_turf"] = "ground"
@@ -493,6 +543,8 @@ Categories:
 
 Rules:
 - Output STRICT JSON only, one key: category
+- If the message contains any explicit intent to reserve/book/confirm a slot — even if it also mentions ground details, price, or facilities — ALWAYS classify as "booking_action", never "ground_info".
+- "ground_info" is ONLY for messages asking about a ground's details, facilities, timings, or pricing WITHOUT wanting to book right now.
 - When in doubt between booking_action and another category, prefer booking_action
 """),
     ("human", "{query}")
@@ -592,3 +644,79 @@ def off_topic_response():
         "I'm built specifically to help with sports ground and tournament bookings, "
         "so I can't help with that — but I'm happy to help you find a ground, check a booking, or plan a tournament!"
     )
+
+general_llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0.4,
+    openai_api_key=settings.OPENAI_API_KEY
+)
+
+general_prompt = ChatPromptTemplate.from_messages([
+    ("system", """
+You are a friendly sports ground booking assistant.
+
+The user may give casual/general messages like hi, hello, yes, ok, thanks, help, what can you do, etc.
+
+Your responsibilities:
+- Understand spelling mistakes and interpret the user's intended meaning.
+- Be conversational and friendly.
+- If the user greets you, welcome them and explain what you can help with.
+- You can help users:
+  * find sports grounds and turfs
+  * recommend venues
+  * show venue details
+  * check availability
+  * make bookings
+  * cancel or reschedule bookings
+- If a city is provided, use it naturally in your response.
+- Never ask for the city again when it is already known.
+- Guide the user toward the next useful step.
+- Keep responses concise but natural.
+- Respond like a helpful booking agent, not like a form asking for fields.
+
+Examples:
+
+User: hi
+Known City: Bangalore
+Response:
+Hi! Welcome to Booking Agent. I can help you find sports grounds and turfs in Bangalore, recommend venues, or book a slot for you.
+
+User: yes
+Known City: Bangalore
+Response:
+Great! I can help you find grounds, check availability, or make a booking in Bangalore. What would you like to do?
+
+User: what can you do
+Known City: Bangalore
+Response:
+I can help you discover grounds, check venue details, recommend turfs, and book slots in Bangalore. Just tell me what you're looking for.
+
+User: bok turff in banglre
+Known City: Bangalore
+Response:
+Sure! I can help you book a turf in Bangalore. Tell me the area, sport, date, and time.
+
+Never respond with:
+"Which city are you interested in?"
+when a city is already known.
+"""),
+    ("human", """
+User Query: {query}
+
+Known City: {city}
+""")
+])
+
+general_query_chain = general_prompt | general_llm
+
+
+def handle_general_query(query, city=None):
+    try:
+        response = general_query_chain.invoke({
+            "query": query,
+            "city": city or "Not provided"
+        })
+        return response.content
+    except Exception as e:
+        logger.error(f"General query chain failed: {e}")
+        return "Hi! I can help you find sports grounds, check availability, or make a booking. What would you like to do?"

@@ -58,12 +58,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Checkout
     checkoutForm.addEventListener("submit", function (e) {
-        if (!sessionId) {
-            e.preventDefault();
-            alert("Please select at least one shift to proceed.");
-            return;
-        }
-        this.action = `/bookings/tournamentcheckout/${sessionId}/`;
+    e.preventDefault();
+
+    if (!sessionId) {
+        alert("Please select at least one shift to proceed.");
+        return;
+    }
+
+    window.location.href =
+        `/bookings/tournamentcheckout/${sessionId}/`;
     });
 
     // Refresh every 5 seconds

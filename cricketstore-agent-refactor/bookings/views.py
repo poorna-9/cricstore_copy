@@ -21,6 +21,7 @@ from ai.chatcric import (
     extract_ground_info_query,
     answer_from_data,
     off_topic_response,
+    handle_general_query,
 )
 import math
 from django.db.models import Avg
@@ -99,6 +100,26 @@ def findgroundsnear(grounds, radius, userlat, userlon):
             nearby_grounds.append(ground)
     return nearby_grounds
 
+RELEASE_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
+
+release_lock = redis_client.register_script(RELEASE_LOCK_SCRIPT)
+
+
+def release_slot_lock(ground_id, slot_id, date_obj, session_id):
+    lock_key = f"lock:slot:{ground_id}:{slot_id}:{date_obj}"
+    return release_lock(keys=[lock_key], args=[str(session_id)])
+
+
+def release_shift_lock(ground_id, date_obj, shift, session_id):
+    lock_key = f"lock:shift:{ground_id}:{date_obj}:{shift}"
+    return release_lock(keys=[lock_key], args=[str(session_id)])
+
 @login_required
 def bookingagent(request):
     return render(request,"bookings/booking-agent.html",{})
@@ -117,6 +138,10 @@ def timingstoslots(timings, sporttype=None, groundorturf="turf", am_pm=None, shi
         "starting": "after",
         "until": "before"
     }
+    has_explicit_range = (
+    "-" in timings
+    or " to " in timings.lower()
+    )
     if shift and am_pm is None:
         am_pm = shift_ampm.get(shift)
     constraint = constraint_map.get(constraint, constraint)
@@ -126,10 +151,15 @@ def timingstoslots(timings, sporttype=None, groundorturf="turf", am_pm=None, shi
     starttime, endtime = parse_natural_timings(timings, shift, am_pm)
     if not starttime or not endtime:
         return userslots
-    if constraint == "after":
-        endtime = closing_time
-    elif constraint == "before" and "-" not in timings:
-        endtime, starttime = starttime, opening_time
+    if has_explicit_range:
+       constraint = "between"
+
+    elif constraint == "after":
+       endtime = closing_time
+
+    elif constraint == "before":
+        endtime = starttime
+        starttime = opening_time
     slotduration = timedelta(hours=3.5) if groundorturf == "ground" else timedelta(hours=1)
     current = datetime.combine(datetime.today(), starttime)
     end_dt = datetime.combine(datetime.today(), endtime)
@@ -591,84 +621,287 @@ def cancel_normal_booking_session(session):
                 is_blocked=False,
                 blocked_at=None
             )
-        
+
+    session_id = str(session.id)
+    session_slots_key = f"session_slots:{session_id}"
+    date_str = str(session.date)
+    for sid in slot_ids:
+        release_slot_lock(session.ground_id, sid, date_str, session_id)
+        redis_client.srem(session_slots_key, str(sid))
+        redis_client.srem(f"ground_slots:{session.ground_id}:{date_str}", str(sid))
+    redis_client.delete(f"session:{session_id}")
+    redis_client.delete(session_slots_key)  
 
 
 
 from django.db import transaction
 
 def cancel_tournament_booking_session(t_session):
-    slot_ids = Orders.objects.filter(
+    order_objs = Orders.objects.filter(
         tournament_session=t_session,
         Tournament_or_normal="tournament",
-    ).values_list('slotsbooked_id', flat=True)
+        payment_status=False,
+        booked=False,
+    )
+
+    slot_ids = list(
+        order_objs.values_list("slotsbooked_id", flat=True)
+    )
+
+    slot_ids = list(set(
+        sid for sid in slot_ids if sid
+    ))
+
     with transaction.atomic():
-        slots.objects.filter(id__in=slot_ids).update(
-            is_blocked=False,
-            blocked_at=None
+        if slot_ids:
+            slots.objects.filter(
+                id__in=slot_ids,
+                ground=t_session.ground,
+            ).update(
+                is_blocked=False,
+                blocked_at=None,
+            )
+
+    session_id = str(t_session.id)
+
+    session_slots_key = (
+        f"tournament_session_slots:{session_id}"
+    )
+
+    for sid in slot_ids:
+        slot = slots.objects.filter(
+            id=sid,
+            ground=t_session.ground,
+        ).only("date").first()
+
+        if not slot:
+            continue
+
+        date_str = str(slot.date)
+
+        release_slot_lock(
+            t_session.ground_id,
+            sid,
+            date_str,
+            session_id,
         )
+
+        redis_client.srem(
+            session_slots_key,
+            str(sid)
+        )
+
+    session_shifts_key = (
+        f"tournament_session_shifts:{session_id}"
+    )
+
+    raw_shifts = redis_client.smembers(
+        session_shifts_key
+    )
+
+    for raw_shift in raw_shifts:
+        raw_shift = (
+            raw_shift.decode()
+            if isinstance(raw_shift, bytes)
+            else str(raw_shift)
+        )
+
+        try:
+            date_str, shift_type = raw_shift.split("|", 1)
+        except ValueError:
+            continue
+
+        release_shift_lock(
+            t_session.ground_id,
+            date_str,
+            shift_type,
+            session_id,
+        )
+
+    redis_client.delete(
+        f"tournament_session:{session_id}"
+    )
+
+    redis_client.delete(
+        session_shifts_key
+    )
+
+    redis_client.delete(
+        session_slots_key
+    )
+
+
 def tournamentBookingPage(request, pk):
-    today = date.today()
     ground = get_object_or_404(Ground, id=pk)
-    SHIFTS = ["morning", "afternoon", "evening", "night"]
+
+    SHIFTS = [
+        "morning",
+        "afternoon",
+        "evening",
+        "night",
+    ]
+
     SHIFT_END = {
         "morning": time(11, 0),
         "afternoon": time(15, 0),
         "evening": time(19, 0),
         "night": time(23, 0),
     }
+
     now = timezone.localtime()
-    today_date = now.date()
+    today = now.date()
     current_time = now.time()
+
     user = request.user if request.user.is_authenticated else None
     user_session_id = None
-    if user:
-        latest_session = tournamentsession.objects.filter(
-            user=user,
-            ground=ground,
-        ).order_by('-created_at').first()
-        if latest_session:
-            session_key = f"tournament_session:{latest_session.id}"
-            if redis_client.exists(session_key):
-                user_session_id = str(latest_session.id)
-    dates = []
+
     user_reserved = {}
     others_reserved = {}
     booked = {}
+
+    if user:
+        latest_session = (
+            tournamentsession.objects
+            .filter(
+                user=user,
+                ground=ground,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if latest_session:
+            session_key = (
+                f"tournament_session:{latest_session.id}"
+            )
+
+            session_shifts_key = (
+                f"tournament_session_shifts:{latest_session.id}"
+            )
+
+            if redis_client.exists(session_key):
+                user_session_id = str(latest_session.id)
+
+                raw_user_shifts = redis_client.smembers(
+                    session_shifts_key
+                )
+
+                for raw_shift in raw_user_shifts:
+                    raw_shift = (
+                        raw_shift.decode()
+                        if isinstance(raw_shift, bytes)
+                        else str(raw_shift)
+                    )
+
+                    try:
+                        date_str, shift = raw_shift.split("|", 1)
+                    except ValueError:
+                        continue
+
+                    user_reserved.setdefault(
+                        date_str,
+                        []
+                    ).append(shift)
+
+    dates = []
+
     for i in range(30):
         d = today + timedelta(days=i)
         date_str = str(d)
+
         dates.append({
             "date": d,
-            "day_num": d.day
+            "day_num": d.day,
         })
+
         for shift in SHIFTS:
-            if d < today_date:
-                # entire past date — all shifts passed
-                booked.setdefault(date_str, []).append(shift)
+
+            if d < today:
+                booked.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
                 continue
-            if d == today_date:
-                # today — check if shift end time has passed
-                if current_time >= SHIFT_END[shift]:
-                    booked.setdefault(date_str, []).append(shift)
-                    continue
-            shift_lock_key = f"lock:shift:{ground.id}:{date_str}:{shift}"
-            owner = redis_client.get(shift_lock_key)
-            if owner:
-                owner = owner.decode() if isinstance(owner, bytes) else str(owner)
-                if user_session_id and owner == user_session_id:
-                    user_reserved.setdefault(date_str, []).append(shift)
-                else:
-                    others_reserved.setdefault(date_str, []).append(shift)
+
+            if (
+                d == today
+                and current_time >= SHIFT_END[shift]
+            ):
+                booked.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
                 continue
-            is_booked_db = slots.objects.filter(
-                ground=ground,
-                date=d,
-                shift=shift,
-                is_booked=True
-            ).exists()
-            if is_booked_db:
-                booked.setdefault(date_str, []).append(shift)
+
+            if shift in user_reserved.get(date_str, []):
+                continue
+
+            shift_slots = list(
+                slots.objects.filter(
+                    ground=ground,
+                    date=d,
+                    shift=shift,
+                ).only(
+                    "id",
+                    "is_booked",
+                    "is_blocked",
+                )
+            )
+
+            if not shift_slots:
+                booked.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+            if any(
+                slot.is_booked
+                for slot in shift_slots
+            ):
+                booked.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+            shift_has_redis_lock = False
+
+            for slot in shift_slots:
+                slot_lock_key = (
+                    f"lock:slot:"
+                    f"{ground.id}:"
+                    f"{slot.id}:"
+                    f"{date_str}"
+                )
+
+                if redis_client.exists(slot_lock_key):
+                    shift_has_redis_lock = True
+                    break
+
+            if shift_has_redis_lock:
+                others_reserved.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+            if any(
+                slot.is_blocked
+                for slot in shift_slots
+            ):
+                others_reserved.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
     context = {
         "ground": ground,
         "dates": dates,
@@ -677,7 +910,193 @@ def tournamentBookingPage(request, pk):
         "others_reserved": others_reserved,
         "booked": booked,
     }
-    return render(request, "bookings/tournament.html", context)
+
+    return render(
+        request,
+        "bookings/tournament.html",
+        context
+    )
+
+
+def gettournamentreserveddays(request):
+    ground_id = request.GET.get("ground_id")
+
+    if not ground_id:
+        return JsonResponse({
+            "success": False,
+            "message": "Missing ground_id",
+        })
+
+    SHIFT_END = {
+        "morning": time(11, 0),
+        "afternoon": time(15, 0),
+        "evening": time(19, 0),
+        "night": time(23, 0),
+    }
+
+    SHIFTS = [
+        "morning",
+        "afternoon",
+        "evening",
+        "night",
+    ]
+
+    now = timezone.localtime()
+    today = now.date()
+    current_time = now.time()
+
+    user = request.user if request.user.is_authenticated else None
+    user_session_id = None
+
+    user_reserved = {}
+    others_reserved = {}
+    booked = {}
+
+    if user:
+        latest_session = (
+            tournamentsession.objects
+            .filter(
+                user=user,
+                ground_id=ground_id,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if latest_session:
+            session_key = (
+                f"tournament_session:{latest_session.id}"
+            )
+
+            session_shifts_key = (
+                f"tournament_session_shifts:{latest_session.id}"
+            )
+
+            if redis_client.exists(session_key):
+                user_session_id = str(latest_session.id)
+
+                raw_user_shifts = redis_client.smembers(
+                    session_shifts_key
+                )
+
+                for raw_shift in raw_user_shifts:
+                    raw_shift = (
+                        raw_shift.decode()
+                        if isinstance(raw_shift, bytes)
+                        else str(raw_shift)
+                    )
+
+                    try:
+                        date_str, shift = raw_shift.split("|", 1)
+                    except ValueError:
+                        continue
+
+                    user_reserved.setdefault(
+                        date_str,
+                        []
+                    ).append(shift)
+
+    for i in range(30):
+        current_date = today + timedelta(days=i)
+        date_str = str(current_date)
+
+        for shift in SHIFTS:
+
+            if current_date < today:
+                booked.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+            if (
+                current_date == today
+                and current_time >= SHIFT_END[shift]
+            ):
+                booked.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+            if shift in user_reserved.get(date_str, []):
+                continue
+
+            shift_slots = list(
+                slots.objects.filter(
+                    ground_id=ground_id,
+                    date=current_date,
+                    shift=shift,
+                ).only(
+                    "id",
+                    "is_booked",
+                    "is_blocked",
+                )
+            )
+
+            if not shift_slots:
+                booked.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+            if any(
+                slot.is_booked
+                for slot in shift_slots
+            ):
+                booked.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+            shift_has_redis_lock = False
+
+            for slot in shift_slots:
+                slot_lock_key = (
+                    f"lock:slot:"
+                    f"{ground_id}:"
+                    f"{slot.id}:"
+                    f"{date_str}"
+                )
+
+                if redis_client.exists(slot_lock_key):
+                    shift_has_redis_lock = True
+                    break
+
+            if shift_has_redis_lock:
+                others_reserved.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+            if any(
+                slot.is_blocked
+                for slot in shift_slots
+            ):
+                others_reserved.setdefault(
+                    date_str,
+                    []
+                ).append(shift)
+
+                continue
+
+    return JsonResponse({
+        "success": True,
+        "user_reserved": user_reserved,
+        "others_reserved": others_reserved,
+        "booked": booked,
+        "session_id": user_session_id,
+    })
+
+
 TOURNAMENT_SESSION_TTL_SECONDS = 15 * 60
 
 
@@ -685,29 +1104,66 @@ TOURNAMENT_SESSION_TTL_SECONDS = 15 * 60
 def reservetournamentday(request):
     logger.info(
         "reservetournamentday called user=%s",
-        request.user.id if getattr(request, "user", None) and request.user.is_authenticated else None
+        request.user.id
+        if getattr(request, "user", None) and request.user.is_authenticated
+        else None
     )
-    if request.method != "POST":
-        return JsonResponse({"success": False})
-    if not request.user.is_authenticated:
-        return JsonResponse({"success": False, "message": "Login required"})
+
     try:
+        if request.method != "POST":
+            return JsonResponse({
+                "success": False,
+                "message": "Invalid request method"
+            })
+
+        if not request.user.is_authenticated:
+            return JsonResponse({
+                "success": False,
+                "message": "User not authenticated"
+            })
+
         user = request.user
         ground_id = request.POST.get("ground_id")
         date_str = request.POST.get("date")
         shift_type = request.POST.get("session_type")
+
         if not (ground_id and date_str and shift_type):
-            return JsonResponse({"success": False, "message": "Missing params"})
-        ground = get_object_or_404(Ground, id=ground_id)
-        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+            return JsonResponse({
+                "success": False,
+                "message": "Missing parameters"
+            })
+
+        try:
+            date_obj = datetime.strptime(
+                date_str,
+                "%Y-%m-%d"
+            ).date()
+
+            ground = Ground.objects.get(id=ground_id)
+
+        except Exception:
+            return JsonResponse({
+                "success": False,
+                "message": "Invalid input"
+            })
+
+        shift_lock_key = (
+            f"lock:shift:{ground_id}:{date_str}:{shift_type}"
+        )
+
         session = tournamentsession.objects.filter(
-           user=user,
-           ground=ground,
-           ).order_by('-created_at').first()
+            user=user,
+            ground_id=ground_id,
+        ).order_by("-created_at").first()
+
         if session:
-            existing_session_key = f"tournament_session:{session.id}"
+            existing_session_key = (
+                f"tournament_session:{session.id}"
+            )
+
             if not redis_client.exists(existing_session_key):
                 cancel_tournament_booking_session(session)
+
                 session = tournamentsession.objects.create(
                     user=user,
                     ground=ground,
@@ -721,10 +1177,23 @@ def reservetournamentday(request):
                 start_date=date_obj,
                 end_date=date_obj,
             )
+
         session_id = str(session.id)
-        session_key = f"tournament_session:{session_id}"
-        session_slots_key = f"tournament_session_slots:{session_id}"
+
+        session_key = (
+            f"tournament_session:{session_id}"
+        )
+
+        session_shifts_key = (
+            f"tournament_session_shifts:{session_id}"
+        )
+
+        session_slots_key = (
+            f"tournament_session_slots:{session_id}"
+        )
+
         ttl = redis_client.ttl(session_key)
+
         if ttl is None or ttl <= 0:
             redis_client.set(
                 session_key,
@@ -734,184 +1203,204 @@ def reservetournamentday(request):
                 }),
                 ex=TOURNAMENT_SESSION_TTL_SECONDS
             )
-            remaining_seconds = TOURNAMENT_SESSION_TTL_SECONDS
+
+            remaining_seconds = (
+                TOURNAMENT_SESSION_TTL_SECONDS
+            )
         else:
             remaining_seconds = ttl
-        redis_client.expire(session_slots_key, remaining_seconds)
-        def get_shift_owner(shift):
-            val = redis_client.get(f"lock:shift:{ground_id}:{date_str}:{shift}")
-            if not val:
-                return None
-            return val.decode() if isinstance(val, bytes) else str(val)
-        already_selected = get_shift_owner(shift_type) == session_id
+
+        redis_client.expire(
+            session_shifts_key,
+            remaining_seconds
+        )
+
+        redis_client.expire(
+            session_slots_key,
+            remaining_seconds
+        )
+
+        already_selected = (
+            redis_client.get(shift_lock_key)
+        )
+
         if already_selected:
-            redis_client.delete(f"lock:shift:{ground_id}:{date_str}:{shift_type}")
-            slot_ids = list(
+            already_selected = (
+                already_selected.decode()
+                if isinstance(already_selected, bytes)
+                else str(already_selected)
+            )
+
+            if already_selected == session_id:
+                redis_client.delete(shift_lock_key)
+
+                slot_ids = list(
                     slots.objects.filter(
                         ground=ground,
                         date=date_obj,
                         shift=shift_type,
                     ).values_list("id", flat=True)
                 )
-            for sid in slot_ids:
-                redis_client.delete(f"lock:slot:{ground_id}:{sid}:{date_str}")
-                redis_client.srem(session_slots_key, str(sid))
-            reservetournament.objects.filter(
-                session=session,
-                ground=ground,
-                date=date_obj,
-                session_type = shift_type,
-            ).delete()
-            return JsonResponse({
-                "success": True,
-                "action": "unreserved",
-                "session_id": session_id,
-                "remaining_seconds": remaining_seconds,
-            })
-        owner = get_shift_owner(shift_type)
-        if owner and owner != session_id:
+
+                for slot_id in slot_ids:
+                    lock_key = (
+                        f"lock:slot:"
+                        f"{ground_id}:"
+                        f"{slot_id}:"
+                        f"{date_str}"
+                    )
+
+                    release_lock(
+                        keys=[lock_key],
+                        args=[session_id]
+                    )
+
+                    redis_client.srem(
+                        session_slots_key,
+                        str(slot_id)
+                    )
+
+                redis_client.srem(
+                    session_shifts_key,
+                    f"{date_str}|{shift_type}"
+                )
+
+                return JsonResponse({
+                    "success": True,
+                    "action": "unselected",
+                    "session_id": session_id,
+                    "remaining_seconds": remaining_seconds,
+                })
+
             return JsonResponse({
                 "success": False,
-                "message": f"{shift_type} shift on {date_str} is already reserved"
+                "message": (
+                    f"{shift_type} shift on "
+                    f"{date_str} is already reserved"
+                )
             })
+
         all_slot_ids = list(
             slots.objects.filter(
                 ground=ground,
                 date=date_obj,
-                shift =shift_type,
+                shift=shift_type,
                 is_booked=False,
                 is_blocked=False,
             ).values_list("id", flat=True)
         )
+
         if not all_slot_ids:
             return JsonResponse({
                 "success": False,
-                "message": "No available slots found for this session type"
+                "message": (
+                    "No available slots found "
+                    "for this session type"
+                )
             })
+
         acquired_slot_locks = []
-        for sid in all_slot_ids:
-            lock_key = f"lock:slot:{ground_id}:{sid}:{date_str}"
+
+        for slot_id in all_slot_ids:
+            lock_key = (
+                f"lock:slot:"
+                f"{ground_id}:"
+                f"{slot_id}:"
+                f"{date_str}"
+            )
+
             acquired = redis_client.set(
                 lock_key,
                 session_id,
                 nx=True,
                 ex=remaining_seconds
             )
+
             if not acquired:
-                for lk in acquired_slot_locks:
-                    redis_client.delete(lk)
+                for acquired_key in acquired_slot_locks:
+                    release_lock(
+                        keys=[acquired_key],
+                        args=[session_id]
+                    )
+
                 return JsonResponse({
                     "success": False,
-                    "message": "One or more slots already reserved"
+                    "message": "One or more slots are already reserved"
                 })
+
             acquired_slot_locks.append(lock_key)
-        redis_client.set(
-            f"lock:shift:{ground_id}:{date_str}:{shift_type}",
+
+        acquired_shift = redis_client.set(
+            shift_lock_key,
             session_id,
+            nx=True,
             ex=remaining_seconds
-         )
-        redis_client.sadd(session_slots_key, *[str(sid) for sid in all_slot_ids])
-        redis_client.expire(session_slots_key, remaining_seconds)
-        with transaction.atomic():
-            rt, _ = reservetournament.objects.get_or_create(
-                session=session,
-                ground=ground,
-                date=date_obj,
-                defaults={
-                    "status": "reserved",
-                    "session_type": shift_type
-                }
-            )
-            rt.status = "reserved"
-            rt.session_type = shift_type
-            rt.save(update_fields=["status", "session_type"])
-            rt.blocked_slots.set(all_slot_ids)
-            if not session.start_date or date_obj < session.start_date:
-                session.start_date = date_obj
-            if not session.end_date or date_obj > session.end_date:
-                session.end_date = date_obj
-            session.session_type = shift_type
-            session.save(update_fields=["start_date", "end_date", "session_type"])
+        )
+
+        if not acquired_shift:
+            for acquired_key in acquired_slot_locks:
+                release_lock(
+                    keys=[acquired_key],
+                    args=[session_id]
+                )
+
+            return JsonResponse({
+                "success": False,
+                "message": (
+                    f"{shift_type} shift on "
+                    f"{date_str} is already reserved"
+                )
+            })
+
+        redis_client.sadd(
+            session_shifts_key,
+            f"{date_str}|{shift_type}"
+        )
+
+        redis_client.sadd(
+            session_slots_key,
+            *[str(slot_id) for slot_id in all_slot_ids]
+        )
+
+        redis_client.expire(
+            session_shifts_key,
+            remaining_seconds
+        )
+
+        redis_client.expire(
+            session_slots_key,
+            remaining_seconds
+        )
+
+        if not session.start_date or date_obj < session.start_date:
+            session.start_date = date_obj
+
+        if not session.end_date or date_obj > session.end_date:
+            session.end_date = date_obj
+
+        session.save(
+            update_fields=["start_date", "end_date"]
+        )
+
         return JsonResponse({
             "success": True,
             "action": "selected",
             "session_id": session_id,
             "remaining_seconds": remaining_seconds,
         })
+
     except Exception as e:
-        logger.exception("Tournament reserve failed: %s", e)
+        logger.exception(
+            "Tournament reservation failed: %s",
+            e
+        )
+
         return JsonResponse({
             "success": False,
-            "message": f"Invalid request: {str(e)}"
-        })
-    
+            "message": "Internal server error"
+        }, status=500)
 
-def gettournamentreserveddays(request):
-    ground_id = request.GET.get("ground_id")
-    if not ground_id:
-        return JsonResponse({"success": False, "message": "Missing ground_id"})
-    SHIFT_END = {
-        "morning": time(11, 0),
-        "afternoon": time(15, 0),
-        "evening": time(19, 0),
-        "night": time(23, 0),
-    }
-    now = timezone.localtime()
-    today_date = now.date()
-    current_time = now.time()
-    today = date.today()
-    SHIFTS = ["morning", "afternoon", "evening", "night"]
-    user = request.user if request.user.is_authenticated else None
-    user_session_id = None
-    if user:
-        latest_session = tournamentsession.objects.filter(
-            user=user,
-            ground_id=ground_id,
-        ).order_by('-created_at').first()
-        if latest_session:
-            session_key = f"tournament_session:{latest_session.id}"
-            if redis_client.exists(session_key):
-                user_session_id = str(latest_session.id)
-    user_reserved = {}
-    others_reserved = {}
-    booked = {}
-    for i in range(30):
-        d = today + timedelta(days=i)
-        date_str = str(d)
-        for shift in SHIFTS:
-            if d < today_date:
-                booked.setdefault(date_str, []).append(shift)
-                continue
-            if d == today_date:
-                if current_time >= SHIFT_END[shift]:
-                    booked.setdefault(date_str, []).append(shift)
-                    continue
-            shift_lock_key = f"lock:shift:{ground_id}:{date_str}:{shift}"
-            owner = redis_client.get(shift_lock_key)
-            if owner:
-                owner = owner.decode() if isinstance(owner, bytes) else str(owner)
-                if user_session_id and owner == user_session_id:
-                    user_reserved.setdefault(date_str, []).append(shift)
-                else:
-                    others_reserved.setdefault(date_str, []).append(shift)
-                continue
 
-            is_booked_db = slots.objects.filter(
-                ground_id=ground_id,
-                date=d,
-                shift=shift,
-                is_booked=True
-            ).exists()
-            if is_booked_db:
-                booked.setdefault(date_str, []).append(shift)
-
-    return JsonResponse({
-        "success": True,
-        "user_reserved": user_reserved,
-        "others_reserved": others_reserved,
-        "booked": booked,
-        "session_id": user_session_id,
-    })
 MAX_SLOTS_PER_SESSION = 6
 
 SESSION_TTL_SECONDS = 10 * 60
@@ -994,7 +1483,7 @@ def reserveslot(request):
         redis_client.expire(session_slots_key, remaining_seconds)
         if redis_client.sismember(session_slots_key, slotid):
             redis_client.srem(session_slots_key, slotid)
-            redis_client.delete(lock_key)
+            release_lock(keys=[lock_key], args=[str(session_id)])
             return JsonResponse({
                 "success": True,
                 "action": "unselected",
@@ -1112,10 +1601,517 @@ def getreservedslots(request):
 client=razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_SECRET_KEY))
 
 
-def lock_tournament_order_slots_for_payment(t_session):
+
+@login_required
+def tournamentcheckout(request, session_id):
+
+    session = get_object_or_404(
+        tournamentsession,
+        id=session_id,
+        user=request.user
+    )
+
+    pay = (
+        payment.objects.filter(
+            tournament_session=session,
+            user=request.user,
+            status=False
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    if pay and pay.expires_at:
+        remaining_seconds = int(
+            (pay.expires_at - timezone.now()).total_seconds()
+        )
+
+        if remaining_seconds <= 0:
+            cancel_tournament_booking_session(session)
+            return redirect("grounds_page")
+
+    session_key = f"tournament_session:{session_id}"
+    session_shifts_key = f"tournament_session_shifts:{session_id}"
+
+    if not redis_client.exists(session_key):
+        cancel_tournament_booking_session(session)
+        return redirect("grounds_page")
+
+    raw_shifts = redis_client.smembers(session_shifts_key)
+
+    if not raw_shifts:
+        cancel_tournament_booking_session(session)
+        return redirect("grounds_page")
+
+    selected_shifts = []
+
+    for value in raw_shifts:
+        value = value.decode() if isinstance(value, bytes) else str(value)
+
+        date_str, shift = value.split("|", 1)
+
+        selected_shifts.append({
+            "date": datetime.strptime(
+                date_str,
+                "%Y-%m-%d"
+            ).date(),
+            "shift": shift,
+        })
+
+    selected_shifts.sort(
+        key=lambda x: (x["date"], x["shift"])
+    )
+
+    PRICE_MAP = {
+        "morning": "t_morning_price",
+        "afternoon": "t_afternoon_price",
+        "evening": "t_evening_price",
+        "night": "t_night_price",
+    }
+
+    total = Decimal("0")
+
+    for item in selected_shifts:
+        price_field = PRICE_MAP.get(item["shift"])
+
+        if price_field:
+            price = getattr(
+                session.ground,
+                price_field,
+                0
+            ) or 0
+
+            total += Decimal(str(price))
+
+    return render(
+        request,
+        "bookings/tournamentcheckout.html",
+        {
+            "session": session,
+            "reserved": selected_shifts,
+            "total": total,
+            "ground": session.ground,
+            "payment_status": request.GET.get("payment"),
+            "remaining_seconds": remaining_seconds if pay else 0,
+        }
+    )
+
+@login_required
+def create_tournament_razorpay_order(request, session_id):
+    if request.method != "POST":
+        return JsonResponse(
+            {
+                "success": False,
+                "message": "Invalid request",
+            },
+            status=400,
+        )
+
+    PRICE_MAP = {
+        "morning": "t_morning_price",
+        "afternoon": "t_afternoon_price",
+        "evening": "t_evening_price",
+        "night": "t_night_price",
+    }
+
+    session = get_object_or_404(
+        tournamentsession,
+        id=session_id,
+        user=request.user,
+    )
+
+    session_id = str(session.id)
+
+    session_key = f"tournament_session:{session_id}"
+    session_shifts_key = f"tournament_session_shifts:{session_id}"
+    session_slots_key = f"tournament_session_slots:{session_id}"
+
+    if not redis_client.exists(session_key):
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": "Session expired",
+            },
+            status=400,
+        )
+
+    raw_shifts = redis_client.smembers(
+        session_shifts_key
+    )
+
+    if not raw_shifts:
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": "No tournament shifts selected",
+            },
+            status=400,
+        )
+
+    selected_shifts = []
+
+    for value in raw_shifts:
+        value = (
+            value.decode()
+            if isinstance(value, bytes)
+            else str(value)
+        )
+
+        try:
+            date_str, shift = value.split("|", 1)
+
+            date_obj = datetime.strptime(
+                date_str,
+                "%Y-%m-%d"
+            ).date()
+
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid tournament shift value: %s",
+                value
+            )
+
+            cancel_tournament_booking_session(session)
+
+            return JsonResponse(
+                {
+                    "success": False,
+                    "redirect": "/bookings/grounds/",
+                    "message": "Invalid tournament selection",
+                },
+                status=400,
+            )
+
+        if shift not in PRICE_MAP:
+            cancel_tournament_booking_session(session)
+
+            return JsonResponse(
+                {
+                    "success": False,
+                    "redirect": "/bookings/grounds/",
+                    "message": "Invalid tournament shift",
+                },
+                status=400,
+            )
+
+        selected_shifts.append(
+            {
+                "date": date_obj,
+                "shift": shift,
+            }
+        )
+
+    raw_slot_ids = redis_client.smembers(
+        session_slots_key
+    )
+
+    if not raw_slot_ids:
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": "No tournament slots selected",
+            },
+            status=400,
+        )
+
+    slot_ids = []
+
+    for raw_slot_id in raw_slot_ids:
+        try:
+            slot_id = int(
+                raw_slot_id.decode()
+                if isinstance(raw_slot_id, bytes)
+                else raw_slot_id
+            )
+
+            slot_ids.append(slot_id)
+
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid tournament slot ID: %s",
+                raw_slot_id
+            )
+
+            cancel_tournament_booking_session(session)
+
+            return JsonResponse(
+                {
+                    "success": False,
+                    "redirect": "/bookings/grounds/",
+                    "message": "Invalid tournament slot selection",
+                },
+                status=400,
+            )
+
+    slot_ids = list(set(slot_ids))
+
+    if not slot_ids:
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": "No tournament slots selected",
+            },
+            status=400,
+        )
+
+    total_amount = Decimal("0")
+
+    for item in selected_shifts:
+        price_field = PRICE_MAP.get(
+            item["shift"]
+        )
+
+        price = getattr(
+            session.ground,
+            price_field,
+            0
+        ) or 0
+
+        total_amount += Decimal(
+            str(price)
+        )
+
+    if total_amount <= 0:
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": "Invalid tournament amount",
+            },
+            status=400,
+        )
+
+    selected_slots = list(
+        slots.objects.filter(
+            id__in=slot_ids,
+            ground=session.ground,
+        )
+    )
+
+    if len(selected_slots) != len(slot_ids):
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": "Some tournament slots are invalid",
+            },
+            status=409,
+        )
+
+    existing_payment = (
+        payment.objects
+        .filter(
+            user=request.user,
+            tournament_session=session,
+            status=False,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    if existing_payment:
+        if not existing_payment.expires_at:
+            cancel_tournament_booking_session(session)
+
+            return JsonResponse(
+                {
+                    "success": False,
+                    "redirect": "/bookings/grounds/",
+                    "message": "Payment session is invalid",
+                },
+                status=400,
+            )
+
+        remaining_seconds = int(
+            (
+                existing_payment.expires_at
+                - timezone.now()
+            ).total_seconds()
+        )
+
+        if remaining_seconds <= 0:
+            cancel_tournament_booking_session(session)
+
+            return JsonResponse(
+                {
+                    "success": False,
+                    "redirect": "/bookings/grounds/",
+                    "message": "Previous payment expired",
+                },
+                status=400,
+            )
+
+        if existing_payment.razorpay_order_id:
+            return JsonResponse(
+                {
+                    "success": True,
+                    "razorpay_order_id":
+                        existing_payment.razorpay_order_id,
+                    "razorpay_key_id":
+                        settings.RAZORPAY_KEY_ID,
+                    "amount":
+                        int(existing_payment.amount * 100),
+                    "ground_name":
+                        session.ground.name,
+                }
+            )
+
+    try:
+        with transaction.atomic():
+            now = timezone.now()
+
+            pay = payment.objects.create(
+                user=request.user,
+                tournament_session=session,
+                amount=total_amount,
+                status=False,
+                expires_at=now + timedelta(minutes=10),
+            )
+
+            for slot in selected_slots:
+                Orders.objects.create(
+                    user=request.user,
+                    ground=session.ground,
+                    tournament_session=session,
+                    date=slot.date,
+                    slotsbooked_id=slot.id,
+                    transaction_id=(
+                        f"tournament_{pay.id}_{slot.id}"
+                    ),
+                    price=Decimal(
+                        str(slot.price or 0)
+                    ),
+                    payment_status=False,
+                    booked=False,
+                    Tournament_or_normal="tournament",
+                )
+
+            ok, message = (
+                lock_tournament_order_slots_for_payment(
+                    session
+                )
+            )
+
+            if not ok:
+                raise ValueError(message)
+
+    except ValueError as e:
+        logger.warning(
+            "Tournament payment validation failed: %s",
+            e
+        )
+
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "redirect": "/bookings/grounds/",
+                "message": str(e),
+            },
+            status=409,
+        )
+
+    except Exception:
+        logger.exception(
+            "Tournament payment database operation failed"
+        )
+
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "message": "Unable to create payment",
+            },
+            status=500,
+        )
+
+    try:
+        razorpay_order = razorpay_client.order.create(
+            {
+                "amount": int(total_amount * 100),
+                "currency": "INR",
+                "receipt": f"tournament_{pay.id}",
+                "notes": {
+                    "payment_id": str(pay.id),
+                    "session_id": str(session.id),
+                    "user_id": str(request.user.id),
+                    "slot_ids": json.dumps(
+                        [
+                            str(slot_id)
+                            for slot_id in slot_ids
+                        ]
+                    ),
+                    "type": "tournament",
+                },
+            }
+        )
+
+    except Exception:
+        logger.exception(
+            "Tournament Razorpay order creation failed"
+        )
+
+        cancel_tournament_booking_session(session)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "message": (
+                    "Payment gateway error. "
+                    "Please try again."
+                ),
+            },
+            status=502,
+        )
+
+    pay.razorpay_order_id = (
+        razorpay_order["id"]
+    )
+
+    pay.save(
+        update_fields=[
+            "razorpay_order_id"
+        ]
+    )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "razorpay_order_id":
+                razorpay_order["id"],
+            "razorpay_key_id":
+                settings.RAZORPAY_KEY_ID,
+            "amount":
+                int(total_amount * 100),
+            "ground_name":
+                session.ground.name,
+        }
+    )
+
+
+def lock_tournament_order_slots_for_payment(session):
     order_objs = list(
         Orders.objects.filter(
-            tournament_session=t_session,
+            tournament_session=session,
+            user=session.user,
             Tournament_or_normal="tournament",
             payment_status=False,
             booked=False,
@@ -1128,228 +2124,271 @@ def lock_tournament_order_slots_for_payment(t_session):
         if order.slotsbooked_id
     ]
 
+    slot_ids = list(set(slot_ids))
+
     if not slot_ids:
         return False, "No tournament order slots found"
 
     locked_slots = list(
         slots.objects
         .select_for_update()
-        .filter(id__in=slot_ids)
+        .filter(
+            id__in=slot_ids,
+            ground=session.ground,
+        )
     )
 
     if len(locked_slots) != len(slot_ids):
-        return False, "Some tournament slots were not found"
+        return False, (
+            "Some tournament slots were not found"
+        )
 
     now = timezone.now()
 
     for slot in locked_slots:
         if slot.is_booked:
-            return False, "One or more tournament slots are already booked"
+            logger.warning(
+                "Tournament slot %d is already booked",
+                slot.id,
+            )
+
+            return False, (
+                "One or more tournament slots "
+                "are already booked"
+            )
 
         if slot.is_blocked:
-            continue
+            logger.warning(
+                "Tournament slot %d is already blocked",
+                slot.id,
+            )
+
+            return False, (
+                "One or more tournament slots "
+                "are already locked"
+            )
 
         slot.is_blocked = True
         slot.blocked_at = now
 
     slots.objects.bulk_update(
         locked_slots,
-        ["is_blocked", "blocked_at"]
+        [
+            "is_blocked",
+            "blocked_at",
+        ],
     )
 
     return True, None
 
 
+def finalize_tournament_razorpay_payment(
+    pay,
+    razorpay_payment_id
+):
+    with transaction.atomic():
+        pay = (
+            payment.objects
+            .select_for_update()
+            .get(id=pay.id)
+        )
 
+        if pay.status:
+            return pay
 
-@login_required
-def tournamentcheckout(request, session_id):
-    PRICE_MAP = {
-        "morning": "t_morning_price",
-        "afternoon": "t_afternoon_price",
-        "evening": "t_evening_price",
-        "night": "t_night_price",
-    }
-    t_session = get_object_or_404(
-        tournamentsession,
-        id=session_id,
-        user=request.user,
-    )
-    session_key = f"tournament_session:{session_id}"
-    if not redis_client.exists(session_key):
-        cancel_tournament_booking_session(t_session)
-        return redirect("grounds_page")
-    reserved_days = (
-        reservetournament.objects
-        .filter(session=t_session, status="reserved")
-        .prefetch_related("blocked_slots")
-    )
-    if not reserved_days.exists():
-        return redirect("tournamentBookingPage", pk=t_session.ground_id)
-    total_amount = Decimal("0")
-    slot_ids = []
-    for rd in reserved_days:
-        shifts_used = (
-            rd.blocked_slots
-            .values_list("shift", flat=True)
-            .distinct()
+        pay.status = True
+        pay.razorpay_payment_id = (
+            razorpay_payment_id
         )
-        for shift in shifts_used:
-            price_field = PRICE_MAP.get(shift)
-            if price_field:
-                total_amount += Decimal(str(getattr(t_session.ground, price_field, 0) or 0))
-        slot_ids.extend(
-            rd.blocked_slots.values_list("id", flat=True)
-        )
-    pay = (
-        payment.objects.filter(
-            user=request.user,
-            tournament_session=t_session,
-            status=False
-        )
-        .order_by("-created_at")
-        .first()
-    )
-    remaining_seconds = 0
-    if pay and pay.expires_at:
-        remaining_seconds = int((pay.expires_at - timezone.now()).total_seconds())
-    if pay and remaining_seconds <= 0:
-        cancel_tournament_booking_session(t_session)
-        return redirect("grounds_page")
-    return render(request, "bookings/tournamentcheckout.html", {
-        "session": t_session,
-        "reserved": reserved_days,
-        "total": total_amount,
-        "ground": t_session.ground,
-        "payment_status": request.GET.get("payment"),
-    })
 
-@login_required
-def create_tournament_razorpay_order(request, session_id):
-    if request.method != "POST":
-        return JsonResponse({
-            "success": False,
-            "message": "Invalid request"
-        }, status=400)
-    PRICE_MAP = {
-        "morning": "t_morning_price",
-        "afternoon": "t_afternoon_price",
-        "evening": "t_evening_price",
-        "night": "t_night_price",
-    }
-    t_session = get_object_or_404(
-        tournamentsession,
-        id=session_id,
-        user=request.user,
-    )
-    reserved_days = (
-        reservetournament.objects
-        .filter(session=t_session, status="reserved")
-        .prefetch_related("blocked_slots")
-    )
-    if not reserved_days.exists():
-        return JsonResponse({
-            "success": False,
-            "redirect": "/bookings/grounds/",
-            "message": "No reserved slots found"
-        }, status=400)
-    total_amount = Decimal("0")
-    slot_ids = []
-    for rd in reserved_days:
-        shifts_used = (
-            rd.blocked_slots
-            .values_list("shift", flat=True)
-            .distinct()
+        pay.save(
+            update_fields=[
+                "status",
+                "razorpay_payment_id",
+            ]
         )
-        for shift in shifts_used:
-            price_field = PRICE_MAP.get(shift)
-            if price_field:
-                total_amount += Decimal(str(getattr(t_session.ground, price_field, 0) or 0))
-        slot_ids.extend(
-            rd.blocked_slots.values_list("id", flat=True)
-        )
-    existing_payment = (
-        payment.objects.filter(
-            user=request.user,
-            tournament_session=t_session,
-            status=False
-        ).order_by("-created_at").first())
-    if existing_payment:
-        remaining_seconds = int((existing_payment.expires_at - timezone.now()).total_seconds())
-        if remaining_seconds <= 0:
-            cancel_tournament_booking_session(t_session)
-            return JsonResponse({
-                "success": False,
-                "redirect": "/bookings/grounds/",
-                "message": "Previous payment expired"
-            }, status=400)
-        return JsonResponse({
-            "success": True,
-            "razorpay_order_id": existing_payment.razorpay_order_id,
-            "razorpay_key_id": settings.RAZORPAY_KEY_ID,
-            "amount": int(existing_payment.amount * 100),
-            "ground_name": t_session.ground.name,
-        })
-    try:
-        with transaction.atomic():
-            now = timezone.now()
-            pay = payment.objects.create(
-                user=request.user,
-                tournament_session=t_session,
-                amount=total_amount,
-                status=False,
-                expires_at=now + timedelta(minutes=10)
+
+        order_qs = (
+            Orders.objects
+            .filter(
+                tournament_session=
+                    pay.tournament_session,
+                user=pay.user,
+                payment_status=False,
+                booked=False,
+                Tournament_or_normal="tournament",
             )
-            for reservation in reserved_days:
-                for slot in reservation.blocked_slots.all():
-                    Orders.objects.create(
-                        user=request.user,
-                        ground=t_session.ground,
-                        tournament_session=t_session,
-                        date=reservation.date,
-                        slotsbooked_id=slot.id,
-                        transaction_id=f"tournament_{pay.id}_{slot.id}",
-                        price=Decimal(str(slot.price or 0)),
-                        payment_status=False,
-                        booked=False,
-                        Tournament_or_normal="tournament",
+        )
+
+        slot_ids = list(
+            order_qs.values_list(
+                "slotsbooked_id",
+                flat=True,
+            )
+        )
+
+        order_qs.update(
+            payment_status=True,
+            booked=True,
+            transaction_id=razorpay_payment_id,
+        )
+
+        slot_objs = list(
+            slots.objects
+            .select_for_update()
+            .filter(id__in=slot_ids)
+        )
+
+        for slot in slot_objs:
+            slot.is_booked = True
+            slot.is_blocked = False
+            slot.blocked_at = None
+
+        slots.objects.bulk_update(
+            slot_objs,
+            [
+                "is_booked",
+                "is_blocked",
+                "blocked_at",
+            ],
+        )
+
+        try:
+            tournament_session_id = str(
+                pay.tournament_session.id
+            )
+
+            session_key = (
+                f"tournament_session:"
+                f"{tournament_session_id}"
+            )
+
+            session_shifts_key = (
+                f"tournament_session_shifts:"
+                f"{tournament_session_id}"
+            )
+
+            session_slots_key = (
+                f"tournament_session_slots:"
+                f"{tournament_session_id}"
+            )
+
+            raw_shifts = redis_client.smembers(
+                session_shifts_key
+            )
+
+            selected_shifts = []
+
+            for value in raw_shifts:
+                value = (
+                    value.decode()
+                    if isinstance(value, bytes)
+                    else str(value)
+                )
+
+                try:
+                    date_str, shift = (
+                        value.split("|", 1)
                     )
-            ok, message = lock_tournament_order_slots_for_payment(t_session)
-            if not ok:
-                raise ValueError(message)
-    except ValueError as e:
-        cancel_tournament_booking_session(t_session)
-        return JsonResponse({
-            "success": False,
-            "redirect": "/bookings/grounds/",
-            "message": str(e)
-        }, status=400)
-    try:
-        razorpay_order = (razorpay_client.order.create({
-            "amount": int(pay.amount * 100),
-            "currency": "INR",
-            "receipt": f"tournament_{pay.id}",
-            "notes":{
-                "payment_id": str(pay.id),
-                "session_id": str(t_session.id),
-                "user_id": str(request.user.id),
-                "slot_ids": json.dumps(slot_ids),
-                "type": "tournament",
-            },
-        }))
-    except Exception:
-        logger.exception( "Tournament Razorpay order creation failed")
-        cancel_tournament_booking_session(t_session)
-        return JsonResponse({"success": False, "message": "Payment gateway error" }, status=500)
-    pay.razorpay_order_id = razorpay_order.get("id")
-    pay.save(update_fields=["razorpay_order_id"])
-    return JsonResponse({
-        "success": True,
-        "razorpay_order_id": razorpay_order.get("id"),
-        "razorpay_key_id": settings.RAZORPAY_KEY_ID,
-        "amount": int(pay.amount * 100),
-        "ground_name": t_session.ground.name,
-    })
+
+                    selected_shifts.append(
+                        (
+                            date_str,
+                            shift,
+                        )
+                    )
+
+                except ValueError:
+                    logger.warning(
+                        "Invalid tournament shift "
+                        "during cleanup: %s",
+                        value,
+                    )
+
+            redis_client.delete(
+                session_key
+            )
+
+            redis_client.delete(
+                session_shifts_key
+            )
+
+            redis_client.delete(
+                session_slots_key
+            )
+
+            tournament_orders = (
+                Orders.objects
+                .filter(
+                    tournament_session=
+                        pay.tournament_session,
+                    user=pay.user,
+                    Tournament_or_normal="tournament",
+                )
+                .select_related("ground")
+            )
+
+            for order in tournament_orders:
+                lock_key = (
+                    f"lock:slot:"
+                    f"{order.ground.id}:"
+                    f"{order.slotsbooked_id}:"
+                    f"{order.date}"
+                )
+
+                redis_client.delete(
+                    lock_key
+                )
+
+            for date_str, shift in selected_shifts:
+                shift_lock_key = (
+                    f"lock:shift:"
+                    f"{pay.tournament_session.ground.id}:"
+                    f"{date_str}:"
+                    f"{shift}"
+                )
+
+                redis_client.delete(
+                    shift_lock_key
+                )
+
+        except Exception:
+            logger.exception(
+                "Failed to clear tournament Redis locks"
+            )
+
+        try:
+            send_booking_event(
+                {
+                    "event":
+                        "tournament_booking_confirmed",
+
+                    "user_id":
+                        str(pay.user.id),
+
+                    "payment_id":
+                        str(pay.id),
+
+                    "razorpay_payment_id":
+                        razorpay_payment_id,
+
+                    "amount":
+                        str(pay.amount),
+
+                    "ground":
+                        str(
+                            pay.tournament_session
+                            .ground.name
+                        ),
+                }
+            )
+
+        except Exception:
+            logger.exception(
+                "Failed to send tournament booking event"
+            )
+
+    return pay
 
 def finalize_tournament_razorpay_payment(
     pay,
@@ -2429,81 +3468,6 @@ def price_gte_q(value):
   Q(night_price__gte=value)
   )
 
-def handle_general_query(query, city=None):
-    from langchain_openai import ChatOpenAI
-    from langchain_core.prompts import ChatPromptTemplate
-
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.4,
-        openai_api_key=settings.OPENAI_API_KEY
-    )
-
-    prompt = ChatPromptTemplate.from_messages([
-    ("system", """
-You are a friendly sports ground booking assistant.
-
-The user may give casual/general messages like hi, hello, yes, ok, thanks, help, what can you do, etc.
-
-Your responsibilities:
-- Understand spelling mistakes and interpret the user's intended meaning.
-- Be conversational and friendly.
-- If the user greets you, welcome them and explain what you can help with.
-- You can help users:
-  * find sports grounds and turfs
-  * recommend venues
-  * show venue details
-  * check availability
-  * make bookings
-  * cancel or reschedule bookings
-- If a city is provided, use it naturally in your response.
-- Never ask for the city again when it is already known.
-- Guide the user toward the next useful step.
-- Keep responses concise but natural.
-- Respond like a helpful booking agent, not like a form asking for fields.
-
-Examples:
-
-User: hi
-Known City: Bangalore
-Response:
-Hi! Welcome to Booking Agent. I can help you find sports grounds and turfs in Bangalore, recommend venues, or book a slot for you.
-
-User: yes
-Known City: Bangalore
-Response:
-Great! I can help you find grounds, check availability, or make a booking in Bangalore. What would you like to do?
-
-User: what can you do
-Known City: Bangalore
-Response:
-I can help you discover grounds, check venue details, recommend turfs, and book slots in Bangalore. Just tell me what you're looking for.
-
-User: bok turff in banglre
-Known City: Bangalore
-Response:
-Sure! I can help you book a turf in Bangalore. Tell me the area, sport, date, and time.
-
-Never respond with:
-"Which city are you interested in?"
-when a city is already known.
-"""),
-
-    ("human", """
-User Query: {query}
-
-Known City: {city}
-""")
-])
-    chain = prompt | llm
-
-    response = chain.invoke({
-        "query": query,
-        "city": city or "Not provided"
-    })
-
-    return response.content
-
 
 
 from django.utils.dateparse import parse_datetime
@@ -2596,7 +3560,14 @@ def get_or_reset_context(request, mode, timeout_minutes=10):
     request.session.modified = True
     return context
 
+BOOKING_INTENT_KEYWORDS = (
+    "book ", "book me", "book a", "reserve ", "want to book",
+    "i want to book", "please book", "confirm booking",
+)
 
+def has_explicit_booking_intent(query):
+    q = (query or "").lower()
+    return any(kw in q for kw in BOOKING_INTENT_KEYWORDS)
 
 def userquerychatbot(request):
     if request.method == "POST":
@@ -2631,7 +3602,12 @@ def userquerychatbot(request):
         return handle_ground_info_query(request, session_context, query)
 
     if not required_fields:
-        category = classify_query(query)
+        if session_context.get("booking_type") in ["normal_booking", "tournament_booking"]:
+          category = "booking_action"
+        elif has_explicit_booking_intent(query):
+            category = "booking_action"
+        else:
+            category = classify_query(query)
 
         if category == "greeting":
             return JsonResponse({"message": handle_general_query(query, globalcity)})
@@ -2690,18 +3666,12 @@ def userquerychatbot(request):
         context["intent"] = normalized_intent
       context['booking_type']=output.get('booking_type')
       context["last_modified_at"]=timezone.now().isoformat()
-      CITY_MAP = {
-        "banglore": ["bangalore", "bengaluru", "banglore", "bglr"],
-         "mumbai": ["mumbai", "bombay"],
-         "delhi": ["delhi", "new delhi", "ndls"],
-         "chennai": ["chennai", "madras"],
-         "kolkata": ["kolkata", "calcutta"],
-         "hyderabad": ["hyderabad", "hyd"],
-         }
       context["city"] = normalize_city(context.get("city"))
       request.session.modified = True
+
       sport_type = (context.get("sporttype") or "").lower().strip()
       ground_or_turf = (context.get("ground_or_turf") or "").lower().strip()
+
       if not sport_type:
        q = query.lower()
        if "football" in q:
@@ -2716,6 +3686,13 @@ def userquerychatbot(request):
           sport_type = "tennis"
        elif "volleyball" in q:
           sport_type = "volleyball"
+
+      if not ground_or_turf:
+        if "turf" in q:
+            ground_or_turf = "turf"
+        elif "ground" in q:
+            ground_or_turf = "ground"
+
       outdoor_sports = ["cricket", "football", "hockey"]
       if not sport_type:
         return ask_user(
@@ -2724,24 +3701,24 @@ def userquerychatbot(request):
             ["city"],
 
         )
-      if sport_type in outdoor_sports:
-        if not ground_or_turf:
+      if sport_type in outdoor_sports and not ground_or_turf:
             return ask_user(
                 context,
                 "ask the user would they like to book a ground or a turf",
                 ["ground_or_turf"]
             )
-      else:
+      if sport_type not in outdoor_sports:
         ground_or_turf = "turf"
-      context["sporttype"] = sport_type
-      context["ground_or_turf"] = ground_or_turf
       request.session.modified = True
+
       if sport_type:
        grounds = Ground.objects.filter(sporttype__icontains=sport_type)
       if ground_or_turf:
           grounds=grounds.filter(types__icontains=ground_or_turf)
       bookingtype= context.get("booking_type", "").lower().strip()
+      print(context)
       if bookingtype=="normal_booking" and context.get("intent") == "show_ground":
+        print(context)
         if not context.get("ground_or_turf_name"):
          if context.get("date"):
             parsed_date=parse_natural_date(context["date"])
@@ -2922,6 +3899,7 @@ def userquerychatbot(request):
                 "ask the user for which date they want to book the ground. They can say 'tomorrow', '28 Jan', or '2026-01-28'.",
                 ["date"]
             )
+        print(context)
         date_str = context["date"]
         parsed_date = parse_natural_date(date_str)
         if not parsed_date:
@@ -2972,27 +3950,38 @@ def userquerychatbot(request):
         userslots = timingstoslots(
             context.get("timings"), context.get("sporttype"),context.get("ground_or_turf"), context.get("am_pm"),context.get("shift"),constraint
         )
-        if not userslots:
-            SHIFT_RANGES = {
-                "morning":   (6, 11),
-                "afternoon": (12, 17),
-                "evening":   (15, 20),
-                "night":     (20, 24),
-            }
-            
-            shift = (context.get("shift") or "").lower().strip()
-            if shift and shift in SHIFT_RANGES:
+        print(userslots)
+        SHIFT_RANGES = {
+            "morning":   (6, 11),
+            "afternoon": (11, 15),
+            "evening":   (15, 19),
+            "night":     (19, 23),
+        }
+
+        shift = (context.get("shift") or "").lower().strip()
+        timings_text = context.get("timings")
+        if shift and shift in SHIFT_RANGES and timings_text and any(c.isdigit() for c in timings_text):
+            parsed_start, parsed_end = parse_natural_timings(
+                timings_text,
+                shift,
+                context.get("am_pm")
+            )
+            if parsed_start and parsed_end:
                 shift_start, shift_end = SHIFT_RANGES[shift]
-                slot_hours = [int(str(s).split(":")[0]) for s in userslots]
-                if not any(shift_start <= h <= shift_end for h in slot_hours):
+                start_hour = parsed_start.hour + parsed_start.minute / 60
+                end_hour = parsed_end.hour + parsed_end.minute / 60
+                if end_hour <= shift_start or start_hour >= shift_end:
                     return ask_user(
                         context,
-                        f"You mentioned '{shift}' but your timings don't fall in that shift. "
-                        f"{shift.capitalize()} slots are between {shift_start}:00 and {shift_end}:00. "
-                        f"Please correct your timings or shift.",
+                        f"You mentioned '{shift}', but your timing "
+                        f"{parsed_start.strftime('%I:%M %p')} to "
+                        f"{parsed_end.strftime('%I:%M %p')} doesn't overlap "
+                        f"with the {shift} shift "
+                        f"({shift_start}:00 to {shift_end}:00). "
+                        f"Please correct your timing or shift.",
                         ["timings", "shift"]
                     )
-            else:
+        if not userslots:
                 return ask_user(
                     context,
                     "I couldn’t understand the time. Please specify a time like '5 to 7 evening'.",
@@ -3085,7 +4074,6 @@ def userquerychatbot(request):
       return JsonResponse({ "message": f"will add it soon"})
     #############################################################################################################################################   
     if mode=="tournament":
-      mode="tournament_booking"
       if request.method == "POST":
         required_fields = body.get("required_fields", [])
         if not isinstance(required_fields, list):
@@ -3161,6 +4149,11 @@ def userquerychatbot(request):
           sport_type = "tennis"
        elif "volleyball" in q:
           sport_type = "volleyball"
+      if sport_type:
+        context["sporttype"] = sport_type
+      if ground_or_turf:
+        context["ground_or_turf"] = ground_or_turf
+      request.session.modified = True
       outdoor_sports = ["cricket", "football", "hockey"]
       if not sport_type:
         return ask_user(
@@ -3183,8 +4176,6 @@ def userquerychatbot(request):
                 f"For tournaments, would you like to book a ground or a turf?",
                 ["ground_or_turf"]
                 )
-      context["sporttype"] = sport_type
-      request.session.modified = True
       if sport_type:
        grounds = Ground.objects.filter(sporttype__icontains=sport_type)
       if ground_or_turf:
@@ -3215,7 +4206,7 @@ def userquerychatbot(request):
           if context.get("rating_min"):
               grounds=grounds.filter(rating__gte=float(context["rating_min"]-2))
           if context.get("rating_semantic"):
-              if context.get("rating_sematic") in ["top","high","good"]:
+              if context.get("rating_semantic") in ["top","high","good"]:
                   grounds=grounds.filter(rating__gte=3)
               elif context.get("rating_semantic") in ["low","bad","poor"]:
                   grounds=grounds.filter(rating__lte=3)
@@ -3227,11 +4218,7 @@ def userquerychatbot(request):
              shiftsperday=shifts(context.get("shifts"),start,end)
              context["start"]=start.isoformat()
              context["end"]=end.isoformat()
-          if not context.get("budget"):
-                grounds=showavailability(grounds,start,end,shiftsperday)
-                if isinstance(grounds, list):
-                  grounds = Ground.objects.filter(id__in=[g.id for g in grounds])
-                grounds=grounds.order_by('-t_fullday_price') 
+          if not context.get("budget"): 
                 cities= Ground.objects.values_list('city', flat=True).distinct()
                 html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
                 return JsonResponse({"message":"these are the grounds near to you","html": html_page})
@@ -3396,7 +4383,7 @@ def userquerychatbot(request):
                             html=html_page
                         )
                 else:
-                        grounds=Ground.objects.filter(city=context["city"])
+                        grounds=Ground.objects.filter(build_city_query(context["city"]))
                         valid_grounds=[]
                         for g in grounds:
                             result=check(ground=g,
@@ -3411,7 +4398,7 @@ def userquerychatbot(request):
                             if result["success"]:
                               valid_grounds.append(g)
                         if not valid_grounds:
-                          grs=Ground.objects.filter(city=context["city"])
+                          grs=Ground.objects.filter(build_city_query(context["city"]))
                           cities= Ground.objects.values_list('city', flat=True).distinct()
                           html_page =  render_to_string("partials/partialcheckpage.html",{"grounds": grs, "cities": cities, "selected_city":""},request=request)
                           return ask_user(
@@ -3429,6 +4416,7 @@ def userquerychatbot(request):
 ##################################################################################################################################################
       if output.get("booking_type") == "tournament_booking" and output.get("intent") in ["book", "reserve", "schedule"]:
         context["stage"] = "collecting_tournament_details"
+        print(context)
         if not context.get("ground_or_turf_name"):
             return ask_user(
                 context,
@@ -3509,6 +4497,17 @@ def userquerychatbot(request):
                 if capacity_check.get("success") and capacity_check.get("schedule"):
                     schedule=capacity_check.get("schedule")
                     total_cost=capacity_check.get("total_cost")
+                    context["budget"] = total_cost
+                    context["tournament_schedule"] = [
+                        {
+                            "date": date.isoformat(),
+                            "shifts": shifts
+                        }
+                        for date, shifts in schedule
+                    ]
+                    context["stage"] = "awaiting_tournament_confirmation"
+                    context["last_modified_at"] = timezone.now().isoformat()
+                    request.session.modified = True
                     schedule_details = get_schedule_details(
                         ground,
                         schedule,
@@ -3517,7 +4516,8 @@ def userquerychatbot(request):
                     print("SCHEDULE DETAILS:", schedule_details)
                     return ask_user(
                         context,
-                        "I found the cheapest available schedule for your tournament.",
+                        f"I found the cheapest available schedule for your tournament. "
+                        f"The total cost is ₹{total_cost}. Would you like to book it?",
                         html=render_to_string(
                             "partials/tournament_schedule.html",
                             {
@@ -3526,7 +4526,8 @@ def userquerychatbot(request):
                                 "total_matches": context["total_matches"],
                                 "overs_per_match": context["overs_per_match"],
                                 "total_cost": total_cost
-                            },request
+                            },
+                            request
                         )
                     )
                 else:
@@ -3568,8 +4569,9 @@ def userquerychatbot(request):
                         matches=int(context["total_matches"]) ,
                         overs=int(context["overs_per_match"]),
                         show=False)
+            print(dicti)
             if not dicti.get("success"):
-                grounds=Ground.objects.filter(city=context["city"])
+                grounds=Ground.objects.filter(build_city_query(context["city"]))
                 valid_grounds=[]
                 for g in grounds:
                             result=check(ground=g,
@@ -3608,10 +4610,13 @@ def userquerychatbot(request):
                         ["start"]
                     )
                 try:
-                  plan = build_plan_from_shifts(dicti["schedule"])
+                  plan = dict(dicti["schedule"])
                   success, session_id = booktournament(request.user, ground, plan)
                 except Exception as e:
-                  return JsonResponse({"message": f"Booking failed: {str(e)}"})
+                  logger.exception("Tournament booking failed")
+                  return JsonResponse({
+                        "message": f"Booking failed: {str(e)}"
+                    })
                 if not success:
                   return JsonResponse({
                       "message": "Unable to reserve tournament slots"
@@ -3619,13 +4624,7 @@ def userquerychatbot(request):
                 else:
                     context["stage"] = "awaiting_payment"
                     return JsonResponse({"message": "Tournament slots reserved. Please complete payment within 15 minutes.","redirect_url": reverse("tournamentcheckout", args=[session_id])})
-def build_plan_from_shifts(shiftsperday):
-    plan = {}
-    for date, shifts in shiftsperday.items():
-        if shifts:
-            plan[date] = shifts
-    return plan
-             
+
 def checkwithoutbudget(ground, start, end, shiftperday):
     availableshiftperday = {}
     current = start
@@ -3653,73 +4652,194 @@ def checkwithoutbudget(ground, start, end, shiftperday):
     return {"success":True}
 
 def booktournament(user, ground, plan):
-    with transaction.atomic():
-        t_session = tournamentsession.objects.create(
+    if not plan:
+        raise ValueError("No tournament shifts selected")
+
+    session = None
+    acquired_shift_locks = []
+    acquired_slot_locks = []
+
+    try:
+        all_dates = list(plan.keys())
+
+        session = tournamentsession.objects.create(
             user=user,
             ground=ground,
-            start_date=min(plan.keys()),
-            end_date=max(plan.keys()),
+            start_date=min(all_dates),
+            end_date=max(all_dates),
         )
-        session_id = str(t_session.id)
+
+        session_id = str(session.id)
+
         session_key = f"tournament_session:{session_id}"
+        session_shifts_key = f"tournament_session_shifts:{session_id}"
         session_slots_key = f"tournament_session_slots:{session_id}"
+
         redis_client.set(
             session_key,
             json.dumps({
                 "user_id": user.id,
                 "ground_id": ground.id,
             }),
-            ex=TOURNAMENT_SESSION_TTL_SECONDS
+            ex=TOURNAMENT_SESSION_TTL_SECONDS,
         )
-        for date, shift_list in plan.items():
-            for shift in shift_list:
+
+        remaining_seconds = TOURNAMENT_SESSION_TTL_SECONDS
+
+        valid_shifts = {
+            "morning",
+            "afternoon",
+            "evening",
+            "night",
+        }
+
+        for date_obj, shift_list in plan.items():
+            for shift_type in shift_list:
+
+                if shift_type not in valid_shifts:
+                    raise ValueError(
+                        f"Invalid tournament shift: {shift_type}"
+                    )
+
+                date_str = str(date_obj)
+
+                shift_lock_key = (
+                    f"lock:shift:"
+                    f"{ground.id}:"
+                    f"{date_str}:"
+                    f"{shift_type}"
+                )
+
                 all_slot_ids = list(
                     slots.objects.filter(
                         ground=ground,
-                        date=date,
-                        shift=shift,
+                        date=date_obj,
+                        shift=shift_type,
                         is_booked=False,
                         is_blocked=False,
-                    ).values_list("id", flat=True)
+                    ).values_list(
+                        "id",
+                        flat=True,
+                    )
                 )
+
                 if not all_slot_ids:
-                    cancel_tournament_booking_session(t_session)
-                    raise Exception(f"No available slots for {shift} on {date}")
-                acquired_slot_locks = []
-                for sid in all_slot_ids:
-                    lock_key = f"lock:slot:{ground.id}:{sid}:{date}"
+                    raise ValueError(
+                        f"No available slots for "
+                        f"{shift_type} on {date_str}"
+                    )
+
+                current_shift_slot_locks = []
+
+                for slot_id in all_slot_ids:
+                    lock_key = (
+                        f"lock:slot:"
+                        f"{ground.id}:"
+                        f"{slot_id}:"
+                        f"{date_str}"
+                    )
+
                     acquired = redis_client.set(
                         lock_key,
                         session_id,
                         nx=True,
-                        ex=TOURNAMENT_SESSION_TTL_SECONDS
+                        ex=remaining_seconds,
                     )
+
                     if not acquired:
-                        for lk in acquired_slot_locks:
-                            redis_client.delete(lk)
-                        raise Exception(f"Slot {sid} already reserved on {date}")
+                        for acquired_key in current_shift_slot_locks:
+                            release_lock(
+                                keys=[acquired_key],
+                                args=[session_id],
+                            )
+
+                        raise ValueError(
+                            f"One or more slots are already "
+                            f"reserved for {date_str} {shift_type}"
+                        )
+
+                    current_shift_slot_locks.append(lock_key)
                     acquired_slot_locks.append(lock_key)
-                redis_client.set(
-                    f"lock:shift:{ground.id}:{date}:{shift}",
+
+                acquired_shift = redis_client.set(
+                    shift_lock_key,
                     session_id,
-                    ex=TOURNAMENT_SESSION_TTL_SECONDS
+                    nx=True,
+                    ex=remaining_seconds,
                 )
-                redis_client.sadd(session_slots_key, *[str(sid) for sid in all_slot_ids])
-                redis_client.expire(session_slots_key, TOURNAMENT_SESSION_TTL_SECONDS)
-                rt, _ = reservetournament.objects.get_or_create(
-                    session=t_session,
-                    ground=ground,
-                    date=date,
-                    defaults={
-                        "status": "reserved",
-                        "session_type": shift
-                    }
+
+                if not acquired_shift:
+                    for acquired_key in current_shift_slot_locks:
+                        release_lock(
+                            keys=[acquired_key],
+                            args=[session_id],
+                        )
+
+                        if acquired_key in acquired_slot_locks:
+                            acquired_slot_locks.remove(acquired_key)
+
+                    raise ValueError(
+                        f"{shift_type} shift on "
+                        f"{date_str} is already reserved"
+                    )
+
+                acquired_shift_locks.append(shift_lock_key)
+
+                redis_client.sadd(
+                    session_shifts_key,
+                    f"{date_str}|{shift_type}",
                 )
-                rt.status = "reserved"
-                rt.session_type = shift
-                rt.save(update_fields=["status", "session_type"])
-                rt.blocked_slots.set(all_slot_ids)
-    return True, t_session.id
+
+                redis_client.sadd(
+                    session_slots_key,
+                    *[
+                        str(slot_id)
+                        for slot_id in all_slot_ids
+                    ],
+                )
+
+        redis_client.expire(
+            session_shifts_key,
+            remaining_seconds,
+        )
+
+        redis_client.expire(
+            session_slots_key,
+            remaining_seconds,
+        )
+
+        return True, session.id
+
+    except Exception as e:
+        logger.exception(
+            "Tournament booking session creation failed: %s",
+            e,
+        )
+
+        if session:
+            session_id = str(session.id)
+
+            for shift_lock_key in acquired_shift_locks:
+                release_lock(
+                    keys=[shift_lock_key],
+                    args=[session_id],
+                )
+
+            for slot_lock_key in acquired_slot_locks:
+                release_lock(
+                    keys=[slot_lock_key],
+                    args=[session_id],
+                )
+
+            redis_client.delete(
+                f"tournament_session:{session_id}",
+                f"tournament_session_shifts:{session_id}",
+                f"tournament_session_slots:{session_id}",
+            )
+
+            session.delete()
+
+        raise
 
 from django.db import transaction
 from django.core.exceptions import ValidationError
@@ -3863,7 +4983,7 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
             acquired = redis_client.set(lock_key, session_id, nx=True, ex=remaining_seconds)
             if not acquired:
                 for sid in locked_slot_ids:
-                    redis_client.delete(f"lock:slot:{ground.id}:{sid}:{date_obj}")
+                    release_slot_lock(ground.id, sid, date_obj, session_id) 
                     redis_client.srem(session_slots_key, str(sid))
                     redis_client.srem(ground_date_key, str(sid))
                 return {'success': False, 'message': 'Some slots were just taken. Please try again.'}

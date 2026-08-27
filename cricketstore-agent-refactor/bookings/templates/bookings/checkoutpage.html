@@ -75,6 +75,10 @@
             <ul>
                 {% for s in slots %}
                     <li>
+                        <strong>
+                            {{ s.date|date:"d M Y" }}
+                        </strong>
+                        <br>
                         {{ s.starttime|time:"h:i A" }} -
                         {{ s.endtime|time:"h:i A" }}
                         <strong>₹{{ s.price }}</strong>

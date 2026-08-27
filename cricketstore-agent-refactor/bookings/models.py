@@ -140,7 +140,7 @@ class reservetournament(models.Model):
     class Meta:
         constraints = [
         models.UniqueConstraint(
-            fields=["ground", "date"],
+            fields=["ground", "date", "session_type"],
             condition=models.Q(status__in=["reserved", "booked"]),
             name="unique_active_tournament_day"
         )

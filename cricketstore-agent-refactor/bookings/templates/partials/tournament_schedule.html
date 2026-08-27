@@ -1,8 +1,171 @@
+{% extends 'bookings/main.html' %}
+{% load static %}
+
+{% block head %}
+<style>
+.tournament-schedule {
+    max-width: 700px;
+    margin: 30px auto;
+    padding: 24px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+    font-family: Arial, sans-serif;
+    color: #1f2937;
+}
+
+.tournament-schedule h3 {
+    margin: 0 0 20px;
+    font-size: 24px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.tournament-summary {
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+}
+
+.tournament-summary p {
+    margin: 8px 0;
+    font-size: 15px;
+}
+
+.tournament-summary strong {
+    color: #374151;
+}
+
+.tournament-schedule hr {
+    border: 0;
+    border-top: 1px solid #e5e7eb;
+    margin: 22px 0;
+}
+
+.tournament-schedule h4 {
+    margin: 0 0 14px;
+    font-size: 18px;
+    color: #111827;
+}
+
+.schedule-day {
+    margin-bottom: 20px;
+    padding: 18px;
+    background: #fafafa;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+}
+
+.schedule-day h5 {
+    margin: 0 0 14px;
+    font-size: 17px;
+    font-weight: 700;
+    color: #2563eb;
+}
+
+.schedule-day table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 15px;
+}
+
+.schedule-day th {
+    background: #f3f4f6;
+    color: #374151;
+    text-align: left;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 11px 12px;
+    border-bottom: 1px solid #d1d5db;
+}
+
+.schedule-day td {
+    padding: 11px 12px;
+    font-size: 14px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.schedule-day tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.schedule-day tbody tr:hover {
+    background: #f8fafc;
+}
+
+.schedule-day p {
+    margin: 8px 0;
+    font-size: 14px;
+    color: #4b5563;
+}
+
+.schedule-day p strong {
+    color: #1f2937;
+}
+
+.schedule-total {
+    margin-top: 24px;
+    padding: 18px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+}
+
+.schedule-total h4 {
+    margin: 0 0 12px;
+    color: #1d4ed8;
+}
+
+.schedule-total p {
+    margin: 8px 0;
+    font-size: 15px;
+}
+
+.schedule-total p:last-child {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+}
+
+@media (max-width: 600px) {
+    .tournament-schedule {
+        margin: 10px;
+        padding: 16px;
+    }
+
+    .tournament-schedule h3 {
+        font-size: 21px;
+    }
+
+    .schedule-day {
+        padding: 12px;
+    }
+
+    .schedule-day table {
+        display: block;
+        overflow-x: auto;
+    }
+
+    .schedule-day th,
+    .schedule-day td {
+        padding: 9px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+
 <div class="tournament-schedule">
 
     <h3>Tournament Schedule</h3>
 
-    <!-- Tournament Summary -->
     <div class="tournament-summary">
 
         <p>
@@ -40,6 +203,7 @@
             </h5>
 
             <table>
+
                 <thead>
                     <tr>
                         <th>Shift</th>
@@ -69,6 +233,7 @@
                     {% endfor %}
 
                 </tbody>
+
             </table>
 
             <p>
@@ -91,7 +256,6 @@
 
     {% endfor %}
 
-    <!-- Final Summary -->
     <div class="schedule-total">
 
         <h4>Booking Summary</h4>
@@ -109,3 +273,5 @@
     </div>
 
 </div>
+
+{% endblock %}
