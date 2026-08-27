@@ -2981,7 +2981,7 @@ def userquerychatbot(request):
             }
             
             shift = (context.get("shift") or "").lower().strip()
-            if shift and shift in SHIFT_RANGES and userslots:
+            if shift and shift in SHIFT_RANGES:
                 shift_start, shift_end = SHIFT_RANGES[shift]
                 slot_hours = [int(str(s).split(":")[0]) for s in userslots]
                 if not any(shift_start <= h <= shift_end for h in slot_hours):
@@ -3339,11 +3339,11 @@ def userquerychatbot(request):
                         "day_num": d.day,
                         "status": status
                     })
-                  context={
+                  template_context={
                         "ground":ground,
                         "datelist":date_list,
                    }
-                  html_page=render_to_string("bookings/tournament.html",context,request=request)
+                  html_page=render_to_string("bookings/tournament.html",template_context,request=request)
                   return JsonResponse({'message':"the availability of 30 days of that ground are", 'html': html_page})
             if context.get("budget"):
                 if not context.get("total_matches"):
@@ -3384,11 +3384,11 @@ def userquerychatbot(request):
                             "day_num": d.day,
                             "status": status
                            })
-                        context={
+                        template_context={
                         "ground":ground,
                         "datelist":date_list,
                         }
-                        html_page=render_to_string("bookings/tournament.html",context,request=request)
+                        html_page=render_to_string("bookings/tournament.html",template_context,request=request)
                         message="the availability of 30 days of that ground are"
                         return ask_user(
                             context,
@@ -3399,7 +3399,7 @@ def userquerychatbot(request):
                         grounds=Ground.objects.filter(city=context["city"])
                         valid_grounds=[]
                         for g in grounds:
-                            result=check(ground=ground,
+                            result=check(ground=g,
                                  start=context["start"],
                                  end=context["end"],
                                  shiftperday=shiftsperday,
