@@ -14,7 +14,14 @@ logger = logging.getLogger(__name__)
 from .utils import db_retry
 from ai.ground import interpret_ground_query
 from django.contrib import messages
-from ai.chatcric import interpretgroundquery
+from ai.chatcric import (
+    interpretgroundquery,
+    frame_chatbot_message,
+    classify_query,
+    extract_ground_info_query,
+    answer_from_data,
+    off_topic_response,
+)
 import math
 from django.db.models import Avg
 from django.db import transaction
@@ -28,6 +35,7 @@ import logging
 logger = logging.getLogger(__name__)
 from .redis_client import redis_client
 from decimal import Decimal
+import re as _re
 
 AFFIRMATIVE_REPLIES = {
     "yes", "y", "confirm", "confirm booking", "confirm cancellation",
@@ -2617,6 +2625,30 @@ def userquerychatbot(request):
                 required_fields = []
        else:
             required_fields = []       
+    session_context = get_or_reset_context(request, mode)
+    awaiting_ground_info_field = session_context.get("stage") == "awaiting_ground_info_field"
+    if awaiting_ground_info_field:
+        return handle_ground_info_query(request, session_context, query)
+
+    if not required_fields:
+        category = classify_query(query)
+
+        if category == "greeting":
+            return JsonResponse({"message": handle_general_query(query, globalcity)})
+
+        if category == "off_topic":
+            return JsonResponse({"message": off_topic_response()})
+
+        if category == "my_bookings":
+            if not request.user.is_authenticated:
+                return JsonResponse({"message": "Please log in to view your bookings."})
+            booking_id = extract_booking_id_from_query(query)
+            data = get_my_bookings_data(request.user, booking_id=booking_id)
+            return JsonResponse({"message": answer_from_data(query, data)})
+
+        if category == "ground_info":
+            return handle_ground_info_query(request, session_context, query)
+        
     if mode=="normal_booking":
       booking_type="normal_booking"
       output = interpretgroundquery(query,booking_type,required_fields)
@@ -3876,24 +3908,6 @@ def process_refund_for_payment(pay, amount_to_refund, notes=None):
 from difflib import get_close_matches
 import re as _re
 
-def find_grounds_fuzzy(name=None, city=None, area=None):
-    qs = Ground.objects.all()
-    if name:
-        qs = qs.filter(name__icontains=name)
-    if city:
-        qs = qs.filter(build_city_query(city))
-    if not area:
-        return qs
-    exact = qs.filter(address__icontains=area)
-    if exact.exists():
-        return exact
-    area_words = _re.findall(r'\w+', area.lower())
-    matched_ids = []
-    for g in qs:
-        addr_words = _re.findall(r'\w+', g.address.lower())
-        if any(get_close_matches(w, addr_words, n=1, cutoff=0.75) for w in area_words):
-            matched_ids.append(g.id)
-    return qs.filter(id__in=matched_ids)
 
 def fuzzy_address_filter(queryset, area):
     if not area:
@@ -3908,6 +3922,34 @@ def fuzzy_address_filter(queryset, area):
         if any(get_close_matches(w, addr_words, n=1, cutoff=0.75) for w in area_words):
             matched_ids.append(g.id)
     return queryset.filter(id__in=matched_ids)
+
+
+def find_grounds_fuzzy(name=None, city=None, area=None):
+    qs = Ground.objects.all()
+    if city:
+        qs = qs.filter(build_city_query(city))
+
+    if name:
+        exact = qs.filter(name__icontains=name)
+        if exact.exists():
+            qs = exact
+        else:
+            GENERIC_WORDS = {"turf", "ground", "grounds", "sports", "arena", "stadium", "academy"}
+            name_words = [w for w in _re.findall(r'\w+', name.lower()) if w not in GENERIC_WORDS]
+            if not name_words:
+                name_words = _re.findall(r'\w+', name.lower())
+            matched_ids = []
+            for g in qs:
+                ground_words = _re.findall(r'\w+', g.name.lower())
+                significant_hits = sum(
+                    1 for w in name_words
+                    if get_close_matches(w, ground_words, n=1, cutoff=0.75)
+                )
+                if significant_hits >= 1:
+                    matched_ids.append(g.id)
+            qs = qs.filter(id__in=matched_ids)
+
+    return fuzzy_address_filter(qs, area)
 
 NUMERIC_FIELD_PARSERS = {
     "hours": parsehours,
@@ -3993,3 +4035,152 @@ def get_schedule_details(ground, schedule, overs):
         "total_matches": total_matches,
         "total_cost": total_cost
     }
+
+def extract_booking_id_from_query(query):
+    if not query:
+        return None
+    match = _re.search(r'(?:booking\s*(?:id)?\s*#?\s*)(\d+)', query.lower())
+    if match:
+        return match.group(1)
+    stripped = query.strip()
+    if stripped.isdigit():
+        return stripped
+    return None
+
+
+def get_my_bookings_data(user, booking_id=None):
+    if not user.is_authenticated:
+        return {"error": "not_logged_in"}
+
+    if booking_id:
+        booking = (
+            Bookings.objects.filter(id=booking_id, user=user)
+            .select_related("ground")
+            .first()
+        )
+        if not booking:
+            return {"error": "not_found", "booking_id": booking_id}
+        return {
+            "bookings": [
+                {
+                    "id": booking.id,
+                    "ground": booking.ground.name,
+                    "date": str(booking.date),
+                    "status": "cancelled" if booking.is_cancelled else ("booked" if booking.booked else "pending payment"),
+                    "price": str(booking.price),
+                    "type": booking.Tournament_or_normal,
+                }
+            ]
+        }
+
+    bookings = (
+        Bookings.objects.filter(user=user)
+        .select_related("ground")
+        .order_by("-created_at")[:10]
+    )
+    return {
+        "bookings": [
+            {
+                "id": b.id,
+                "ground": b.ground.name,
+                "date": str(b.date),
+                "status": "cancelled" if b.is_cancelled else ("booked" if b.booked else "pending payment"),
+                "price": str(b.price),
+                "type": b.Tournament_or_normal,
+            }
+            for b in bookings
+        ]
+    }
+
+def get_ground_info_data(ground):
+    return {
+        "name": ground.name,
+        "city": ground.city,
+        "address": ground.address,
+        "sport": ground.sporttype,
+        "type": ground.types,
+        "rating": ground.rating,
+        "price": str(ground.price) if ground.price else None,
+        "is_open": ground.opens,
+        "bat_ball_provided": ground.batballprovided,
+        "washrooms_available": ground.washroomsavailable,
+        "dimensions": ground.Grounddimensions,
+    }
+
+def handle_ground_info_query(request, context, query):
+    extracted = extract_ground_info_query(query)
+    ground_name = extracted.get("ground_or_turf_name") or context.get("ground_or_turf_name")
+    city = extracted.get("city") or context.get("city")
+    area = extracted.get("area") or context.get("area")
+
+    if city:
+        context["city"] = normalize_city(city)
+    if area:
+        context["area"] = area
+    if ground_name:
+        context["ground_or_turf_name"] = ground_name
+    request.session.modified = True
+
+    if not context.get("ground_or_turf_name"):
+        context["stage"] = "awaiting_ground_info_field"
+        context["ground_info_missing_field"] = "ground_or_turf_name"
+        context["ground_info_pending_question"] = query
+        request.session.modified = True
+        return ask_user(context, "Which ground or turf are you asking about?", ["ground_or_turf_name"])
+
+    if not context.get("city"):
+        context["stage"] = "awaiting_ground_info_field"
+        context["ground_info_missing_field"] = "city"
+        context["ground_info_pending_question"] = query
+        request.session.modified = True
+        return ask_user(context, "Which city is that ground/turf in?", ["city"])
+
+    matches = find_grounds_fuzzy(
+        name=context["ground_or_turf_name"],
+        city=context.get("city"),
+        area=context.get("area"),
+    )
+    count = matches.count()
+    cities = Ground.objects.values_list('city', flat=True).distinct()
+
+    if count == 0:
+        context["stage"] = "awaiting_ground_info_field"
+        context["ground_info_missing_field"] = "area"
+        context["ground_info_pending_question"] = query
+        request.session.modified = True
+        fallback = Ground.objects.filter(build_city_query(context["city"]))
+        if context.get("area"):
+            fallback = fuzzy_address_filter(fallback, context["area"])
+        html_page = render_to_string(
+            "partials/partialcheckpage.html",
+            {"grounds": fallback, "cities": cities, "selected_city": ""},
+            request=request,
+        )
+        return ask_user(
+            context=context,
+            backend_message="I couldn't find a ground with that name in that area. Here are some nearby — please pick one, or tell me the area again.",
+            html=html_page,
+        )
+
+    if count > 1:
+        html_page = render_to_string(
+            "partials/partialcheckpage.html",
+            {"grounds": matches, "cities": cities, "selected_city": ""},
+            request=request,
+        )
+        return ask_user(context, "I found multiple grounds with that name. Please check the list.", html=html_page)
+
+    ground = matches.first()
+    data = get_ground_info_data(ground)
+    html_page = render_to_string(
+        "partials/partialcheckpage.html",
+        {"grounds": [ground], "cities": cities, "selected_city": ""},
+        request=request,
+    )
+
+    context.pop("stage", None)
+    context.pop("ground_info_missing_field", None)
+    context.pop("ground_info_pending_question", None)
+    request.session.modified = True
+
+    return JsonResponse({"message": answer_from_data(query, data), "html": html_page})
