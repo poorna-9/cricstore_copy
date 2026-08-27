@@ -475,3 +475,120 @@ def frame_chatbot_message(query, context, backend_message):
         return backend_message
     
 
+class QueryRouteSchema(BaseModel):
+    category: Literal["greeting", "off_topic", "my_bookings", "ground_info", "booking_action"]
+
+query_route_parser = PydanticOutputParser(pydantic_object=QueryRouteSchema)
+
+query_route_prompt = ChatPromptTemplate.from_messages([
+    ("system", """
+You classify a user's message into exactly one category for a sports ground booking assistant.
+
+Categories:
+- "greeting": hi, hello, thanks, bye, small talk with no booking content
+- "off_topic": anything unrelated to sports ground booking (weather, general knowledge, coding help, news, other companies, etc.)
+- "my_bookings": user asks about their own existing bookings, booking history, or booking status
+- "ground_info": user asks about a specific ground/turf's details, facilities, parking, timings, pricing, or whether it's open — without wanting to book right now
+- "booking_action": user wants to search, book, cancel, reschedule, or plan a tournament
+
+Rules:
+- Output STRICT JSON only, one key: category
+- When in doubt between booking_action and another category, prefer booking_action
+"""),
+    ("human", "{query}")
+]).partial(format_instructions=query_route_parser.get_format_instructions())
+
+query_route_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=settings.OPENAI_API_KEY)
+query_route_chain = query_route_prompt | query_route_llm | query_route_parser
+
+def classify_query(query):
+    try:
+        result = query_route_chain.invoke({"query": query})
+        return result.category
+    except Exception as e:
+        logger.error(f"Query route classification failed: {e}")
+        return "booking_action"
+
+
+class GroundInfoFilters(BaseModel):
+    ground_or_turf_name: str = ""
+    city: str = ""
+    area: str = ""
+
+ground_info_parser = PydanticOutputParser(pydantic_object=GroundInfoFilters)
+ground_info_prompt = ChatPromptTemplate.from_messages([
+    ("system", """
+Extract the ground/turf name, city, and area mentioned in the user's question about a specific sports ground, if present.
+Leave a field as "" if not explicitly mentioned. Do NOT guess or invent a name.
+Output STRICT JSON only.
+
+{format_instructions}
+"""),
+    ("human", "{query}")
+]).partial(format_instructions=ground_info_parser.get_format_instructions())
+ground_info_chain = ground_info_prompt | normal_llm | ground_info_parser
+
+def extract_ground_info_query(query):
+    try:
+        result = ground_info_chain.invoke({"query": query})
+        return result.dict()
+    except Exception as e:
+        logger.error(f"Ground info extraction failed: {e}")
+        return {"ground_or_turf_name": "", "city": "", "area": ""}
+
+
+class DataAnswerSchema(BaseModel):
+    message: str
+
+data_answer_parser = PydanticOutputParser(pydantic_object=DataAnswerSchema)
+
+data_answer_llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0.1,
+    max_tokens=220,
+    openai_api_key=settings.OPENAI_API_KEY
+)
+
+data_answer_prompt = ChatPromptTemplate.from_messages([
+    ("system", """
+You are a sports ground booking assistant. Answer the user's question using ONLY the data provided below.
+Do NOT invent grounds, facilities, or values not present in the data.
+If the data indicates the ground/booking wasn't found, say so naturally and offer to help find one instead.
+
+LENGTH RULES (VERY IMPORTANT):
+- If the data contains a SINGLE item (one booking or one ground), you may answer in detail — include the fields relevant to what the user asked.
+- If the data contains MULTIPLE items (a list of bookings), do NOT list every field for every item.
+  Summarize concisely instead: e.g. counts by status ("3 upcoming, 1 cancelled"), and only
+  call out specific bookings if the user's question needs it (e.g. "which one is today").
+- Keep the whole answer under about 120 words unless the user explicitly asks for full details.
+- Never dump raw JSON or field names back to the user — always phrase it naturally.
+
+Return ONLY valid JSON with one key: message.
+
+{format_instructions}
+"""),
+    ("human", """
+User query:
+{query}
+
+Data (JSON):
+{data}
+""")
+]).partial(format_instructions=data_answer_parser.get_format_instructions())
+
+data_answer_chain = data_answer_prompt | data_answer_llm | data_answer_parser
+
+
+def answer_from_data(query, data):
+    try:
+        result = data_answer_chain.invoke({"query": query, "data": json.dumps(data, default=str)})
+        return result.message
+    except Exception as e:
+        logger.error(f"Data answer chain failed: {e}")
+        return "Here's what I found."
+
+def off_topic_response():
+    return (
+        "I'm built specifically to help with sports ground and tournament bookings, "
+        "so I can't help with that — but I'm happy to help you find a ground, check a booking, or plan a tournament!"
+    )
