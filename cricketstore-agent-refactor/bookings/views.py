@@ -573,17 +573,31 @@ def grounddetail(request, pk):
         ground=ground,
         date=date_obj,
           ).order_by('-created_at').first()
-        if usersession:
-            session_key = f"session:{usersession.id}"
-            if redis_client.exists(session_key):
-                session_slots_key = f"session_slots:{usersession.id}"
-                redis_slot_ids = redis_client.smembers(session_slots_key)
-                userreservedslots = [
-                   int(sid.decode() if isinstance(sid, bytes) else sid)
-                   for sid in redis_slot_ids
-                ]
-            else:
-                userreservedslots = []
+        if request.user.is_authenticated:
+            usersession = reservationsession.objects.filter(
+            user=request.user,
+            ground=ground,
+            date=date_obj,
+            ).order_by('-created_at').first()
+            if usersession:
+                session_key = f"session:{usersession.id}"
+                if redis_client.exists(session_key):
+                    session_slots_key = f"session_slots:{usersession.id}"
+                    redis_slot_ids = redis_client.smembers(session_slots_key)
+                    userreservedslots = []
+                    stale_session_slot_ids = []
+                    for sid in redis_slot_ids:
+                        sid_str = sid.decode() if isinstance(sid, bytes) else sid
+                        sid_int = int(sid_str)
+                        lock_key = f"lock:slot:{ground.id}:{sid_int}:{date_obj}"
+                        if redis_client.exists(lock_key):
+                            userreservedslots.append(sid_int)
+                        else:
+                            stale_session_slot_ids.append(sid_str)
+                    if stale_session_slot_ids:
+                        redis_client.srem(session_slots_key, *stale_session_slot_ids)
+                else:
+                    userreservedslots = []
     booked_id_list = list(booked.values_list("id", flat=True))
     reserved_id_list = list(reserved.values_list("id", flat=True))
     context = {
@@ -3597,6 +3611,7 @@ def userquerychatbot(request):
        else:
             required_fields = []       
     session_context = get_or_reset_context(request, mode)
+    print(session_context)
     awaiting_ground_info_field = session_context.get("stage") == "awaiting_ground_info_field"
     if awaiting_ground_info_field:
         return handle_ground_info_query(request, session_context, query)
@@ -3694,6 +3709,18 @@ def userquerychatbot(request):
             ground_or_turf = "ground"
 
       outdoor_sports = ["cricket", "football", "hockey"]
+      if not sport_type and context.get("ground_or_turf_name"):
+        candidate = find_grounds_fuzzy(
+            name=context["ground_or_turf_name"],
+            city=context.get("city"),
+            area=context.get("area"),
+        ).first()
+        if candidate and candidate.sporttype:
+            sport_type = candidate.sporttype.lower().strip()
+            context["sporttype"] = sport_type
+            if not ground_or_turf and candidate.types:
+                ground_or_turf = candidate.types.lower().strip()
+                context["ground_or_turf"] = ground_or_turf
       if not sport_type:
         return ask_user(
             context,
@@ -4870,15 +4897,30 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
                 return {'success': False, 'message': f"Invalid slot format: {slot_str}"}
         parsed_user_slots.sort(key=lambda x: x[0])
         ground_date_key = f"ground_slots:{ground.id}:{date_obj}"
-        redis_locked_ids = redis_client.smembers(ground_date_key)
+        redis_locked_ids_raw = redis_client.smembers(ground_date_key)
+
+        truly_locked_ids = []
+        stale_ids = []
+        for raw_id in redis_locked_ids_raw:
+            slot_id = int(raw_id)
+            lock_key = f"lock:slot:{ground.id}:{slot_id}:{date_obj}"
+            if redis_client.exists(lock_key):
+                truly_locked_ids.append(slot_id)
+            else:
+                stale_ids.append(raw_id)
+
+        if stale_ids:
+            redis_client.srem(ground_date_key, *stale_ids)
+
         availableslots = list(
             slots.objects.filter(
                 ground=ground,
                 date=date_obj,
                 is_booked=False,
                 is_blocked=False,
-            ).exclude(id__in=[int(x) for x in redis_locked_ids])
+            ).exclude(id__in=truly_locked_ids)
         )
+
         if not availableslots:
             return {'success': False, 'message': 'No slots available.'}
         slotmap = {(s.starttime, s.endtime): s for s in availableslots}
@@ -4923,12 +4965,23 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
                 )
             available_alternatives = []
             for alt in alternative_grounds:
-                alt_locked = redis_client.smembers(f"ground_slots:{alt.id}:{date_obj}")
+                alt_key = f"ground_slots:{alt.id}:{date_obj}"
+                alt_locked_raw = redis_client.smembers(alt_key)
+                alt_truly_locked = []
+                alt_stale = []
+                for raw_id in alt_locked_raw:
+                    sid = int(raw_id)
+                    if redis_client.exists(f"lock:slot:{alt.id}:{sid}:{date_obj}"):
+                        alt_truly_locked.append(sid)
+                    else:
+                        alt_stale.append(raw_id)
+                if alt_stale:
+                    redis_client.srem(alt_key, *alt_stale)
                 alt_slots = slots.objects.filter(
                     ground=alt,
                     date=date_obj,
                     is_booked=False
-                ).exclude(id__in=[int(x) for x in alt_locked])
+                ).exclude(id__in=alt_truly_locked)
                 if alt_slots.exists():
                     available_alternatives.append(alt)
             return {
