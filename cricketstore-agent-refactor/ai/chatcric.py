@@ -131,6 +131,18 @@ LOCATION RULES:
   → set nearme = true
 - Do NOT set radius_km unless explicitly mentioned
 
+SPORT TYPE RULES:
+- sporttype MUST be one of: cricket, football, hockey, badminton, tennis, volleyball
+- Do NOT put anything else into sporttype, even if it contains the word "sport" or "sports"
+- If the text looks like a proper venue name (e.g. contains "Sports", "Turf", "Arena",
+  "Academy", "Stadium", or is clearly a business/place name), put it in
+  ground_or_turf_name instead — NEVER in sporttype
+
+GROUND/TURF NAME RULES:
+- ground_or_turf_name → extract ONLY when a specific proper name is given
+  (e.g. "Tiger 5 Sports", "XYZ Turf", "Champions Arena")
+- Location words (city, area) are NOT ground/turf names
+
 {format_instructions}
 """),
     ("human", "{query}")
@@ -169,14 +181,59 @@ Interpretation rules:
 - Ground/turf names are usually proper names and may contain words like:
   ground, turf, stadium, arena, sports, academy
 
+KNOWN CITIES (use this exact list to decide city vs area):
+- bangalore (also written as: bangalore, bengaluru, banglore, bglr)
+- mumbai (also written as: mumbai, bombay)
+- delhi (also written as: delhi, new delhi, ndls)
+- chennai (also written as: chennai, madras)
+- kolkata (also written as: kolkata, calcutta)
+- hyderabad (also written as: hyderabad, hyd)
+
+CITY vs AREA CLASSIFICATION RULE (MANDATORY):
+- If a location word/phrase in the reply matches one of the KNOWN CITIES above
+  (including its listed spellings/aliases), put it in "city".
+- If a location word/phrase does NOT match any KNOWN CITY or its aliases,
+  it is a locality/neighbourhood — put it in "area" instead.
+- NEVER put a KNOWN CITY name (or its alias) into "area".
+- NEVER put a non-matching locality name into "city".
+- Some known area names are indiranagar,lb nagar,mahadevapura,silk board,jubilee hills etc 
+
+COMMA-SEPARATED REPLIES (MANDATORY):
+When the reply has multiple comma-separated segments:
+  - The 1st segment is always the field currently being asked for
+    (e.g. ground_or_turf_name).
+  - For every remaining segment, apply the CITY vs AREA rule above.
+  - NEVER leave commas or extra location text inside ground_or_turf_name.
+
+Examples:
+  Reply: "Tiger 5 Sports, Indiranagar"
+    -> ground_or_turf_name = "Tiger 5 Sports", area = "indiranagar"
+  Reply: "Tiger 5 Sports, Bangalore"
+    -> ground_or_turf_name = "Tiger 5 Sports", city = "Bangalore"
+  Reply: "Tiger 5 Sports, Bengaluru"
+    -> ground_or_turf_name = "Tiger 5 Sports", city = "Bengaluru"
+  Reply: "Tiger 5 Sports, Doddankundi, Bangalore"
+    -> ground_or_turf_name = "Tiger 5 Sports", area = "Doddankundi", city = "Bangalore"
+
+
+SPORT TYPE RULES:
+- sporttype MUST be one of: cricket, football, hockey, badminton, tennis, volleyball
+- Do NOT put anything else into sporttype, even if it contains the word "sport" or "sports"
+- If the text looks like a proper venue name (e.g. contains "Sports", "Turf", "Arena",
+  "Academy", "Stadium", or is clearly a business/place name), put it in
+  ground_or_turf_name instead — NEVER in sporttype
+
+GROUND/TURF NAME RULES:
+- ground_or_turf_name → extract ONLY when a specific proper name is given
+  (e.g. "Tiger 5 Sports", "XYZ Turf", "Champions Arena")
+- Location words (city, area) are NOT ground/turf names
+
 {format_instructions}
 """),
     ("human", "{query}")
 ]).partial(
     format_instructions=normal_parser.get_format_instructions()
 )
-
-
 missing_chain = missing_prompt | normal_llm | normal_parser
 
 class AllowedShifts(BaseModel):
@@ -400,12 +457,15 @@ tournament_missing_chain = tournament_missing_prompt | normal_llm | tournament_p
 def interpretgroundquery(user_query, booking_type, required_fields):
     route = "full_parse"
     if required_fields:
-        route_decision = route_chain.invoke({
-            "required_fields": ", ".join(required_fields),
-            "query": user_query
-        })
-        if route_decision.confidence >= 0.7:
-            route = route_decision.route
+        try:
+            route_decision = route_chain.invoke({
+                "required_fields": ", ".join(required_fields),
+                "query": user_query
+            })
+            if route_decision.confidence >= 0.7:
+                route = route_decision.route
+        except Exception as e:
+            logger.error(f"Route classification failed: {e}")
     try:
         if booking_type == "normal_booking":
             if route == "missing_fields":
