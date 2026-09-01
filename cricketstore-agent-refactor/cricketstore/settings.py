@@ -161,10 +161,13 @@ STORAGES = {
 }
 
 ELASTICSEARCH_DSL = {
-        "default": {
-              'hosts':'http://elasticsearch:9200'
-        }
+    "default": {
+        "hosts": os.getenv(
+            "ELASTICSEARCH_URL",
+            "http://elasticsearch:9200"
+        )
     }
+}
 
 LOGGING = {
     "version": 1,
