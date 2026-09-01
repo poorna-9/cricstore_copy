@@ -29,7 +29,9 @@ urlpatterns = [
     path('loaderio-f2c7f06c91b90ddb12bf8c2c4675a883/', loaderio_verify),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+urlpatterns += static(
+    settings.MEDIA_URL,
+    document_root=settings.MEDIA_ROOT
+)
 
 
