@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path,include
 from django.conf.urls.static import static
+from django.views.static import serve
 from django.conf import settings
 from django.http import HttpResponse
 def loaderio_verify(request):
@@ -29,9 +30,13 @@ urlpatterns = [
     path('loaderio-f2c7f06c91b90ddb12bf8c2c4675a883/', loaderio_verify),
 ]
 
-urlpatterns += static(
-    settings.MEDIA_URL,
-    document_root=settings.MEDIA_ROOT
-)
-
+urlpatterns += [
+    path(
+        "media/<path:path>",
+        serve,
+        {
+            "document_root": settings.MEDIA_ROOT,
+        },
+    ),
+]
 
